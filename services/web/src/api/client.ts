@@ -8,6 +8,7 @@ export interface CreateJobInput {
   respectRobots: boolean;
   storeHtml: boolean;
   plugins: string[];
+  webhookUrl?: string;
 }
 
 export interface JobStatus {

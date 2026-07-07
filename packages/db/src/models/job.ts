@@ -15,6 +15,8 @@ const jobSchema = new Schema(
     respectRobots: { type: Boolean, required: true },
     storeHtml: { type: Boolean, default: false },
     plugins: { type: [String], default: [] },
+    // Optional terminal-state callback (M6 Step B).
+    webhookUrl: { type: String, default: null },
     status: {
       type: String,
       // cancelling → cancelled is the two-phase cancel (M6): between the API call

@@ -18,6 +18,7 @@ export async function createJob(input: JobRecordInput): Promise<void> {
     respectRobots: input.respectRobots,
     storeHtml: input.storeHtml,
     plugins: input.plugins,
+    webhookUrl: input.webhookUrl ?? null,
   });
 }
 
@@ -61,6 +62,7 @@ export interface JobRecord {
   readonly sameHostOnly: boolean;
   readonly respectRobots: boolean;
   readonly storeHtml: boolean;
+  readonly webhookUrl: string | null;
   readonly createdAt: string;
   readonly completedAt: string | null;
 }
@@ -78,6 +80,7 @@ export async function getJob(jobId: string): Promise<JobRecord | null> {
     sameHostOnly: d.sameHostOnly,
     respectRobots: d.respectRobots,
     storeHtml: d.storeHtml ?? false,
+    webhookUrl: d.webhookUrl ?? null,
     createdAt: (d.createdAt ?? new Date()).toISOString(),
     completedAt: d.completedAt ? d.completedAt.toISOString() : null,
   };
@@ -93,6 +96,7 @@ export async function getJobConfig(jobId: string): Promise<JobConfig | null> {
     respectRobots: doc.respectRobots,
     storeHtml: doc.storeHtml ?? false,
     plugins: doc.plugins ?? [],
+    webhookUrl: doc.webhookUrl ?? null,
   };
 }
 

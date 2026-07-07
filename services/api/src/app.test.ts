@@ -32,6 +32,7 @@ const job = (status: string) => ({
   sameHostOnly: true,
   respectRobots: true,
   storeHtml: false,
+  webhookUrl: null,
   createdAt: new Date().toISOString(),
   completedAt: null,
 });
@@ -63,6 +64,20 @@ describe("api", () => {
     const r = await request(app)
       .post("/jobs")
       .send({ seedUrl: "http://localhost:9002/" });
+    expect(r.status).toBe(400);
+  });
+
+  it("POST /jobs rejects a non-http(s) webhook URL → 400", async () => {
+    const r = await request(app)
+      .post("/jobs")
+      .send({ seedUrl: "https://example.com/", webhookUrl: "ftp://x/hook" });
+    expect(r.status).toBe(400);
+  });
+
+  it("POST /jobs pre-screens an internal webhook URL → 400", async () => {
+    const r = await request(app)
+      .post("/jobs")
+      .send({ seedUrl: "https://example.com/", webhookUrl: "http://127.0.0.1/hook" });
     expect(r.status).toBe(400);
   });
 });

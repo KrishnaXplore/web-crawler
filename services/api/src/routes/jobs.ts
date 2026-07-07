@@ -26,6 +26,11 @@ const createJobSchema = z.object({
   respectRobots: z.boolean().default(true),
   storeHtml: z.boolean().default(false),
   plugins: z.array(z.string()).default([]),
+  webhookUrl: z
+    .string()
+    .url()
+    .refine((u) => /^https?:\/\//i.test(u), "must be http(s)")
+    .optional(),
 });
 
 export function createJobsRouter(deps: AppDeps): express.Router {
@@ -47,6 +52,7 @@ export function createJobsRouter(deps: AppDeps): express.Router {
           respectRobots: body.respectRobots,
           storeHtml: body.storeHtml,
           plugins: body.plugins,
+          webhookUrl: body.webhookUrl ?? null,
         };
         const jobId = randomUUID();
         await createJob({ jobId, seedUrl: seed, ...config });

@@ -19,6 +19,8 @@ export const envSchema = z.object({
   MINIO_BUCKET: z.string().default("crawler-blobs"),
   API_PORT: z.coerce.number().int().positive().default(3000),
   API_KEY: z.string().optional(),
+  /** HMAC secret for signing webhook deliveries (M6 B). Unset ⇒ unsigned. */
+  WEBHOOK_SECRET: z.string().optional(),
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(4),
   WORKER_METRICS_PORT: z.coerce.number().int().positive().default(9464),
   CRAWL_DELAY_MS: z.coerce.number().int().nonnegative().default(200),

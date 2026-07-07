@@ -9,6 +9,7 @@ export function JobForm({ onCreated }: { onCreated: (id: string) => void }) {
   const [respectRobots, setRespectRobots] = useState(true);
   const [storeHtml, setStoreHtml] = useState(false);
   const [plugins, setPlugins] = useState<string[]>(["seo", "tech", "security"]);
+  const [webhookUrl, setWebhookUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -31,6 +32,7 @@ export function JobForm({ onCreated }: { onCreated: (id: string) => void }) {
         respectRobots,
         storeHtml,
         plugins,
+        webhookUrl: webhookUrl.trim() || undefined,
       });
       onCreated(jobId);
     } catch (err) {
@@ -92,6 +94,14 @@ export function JobForm({ onCreated }: { onCreated: (id: string) => void }) {
           onChange={(e) => setStoreHtml(e.target.checked)}
         />
         Store raw HTML
+      </label>
+      <label>
+        Webhook URL (optional — POSTed on completion)
+        <input
+          value={webhookUrl}
+          onChange={(e) => setWebhookUrl(e.target.value)}
+          placeholder="https://example.com/hook"
+        />
       </label>
       <fieldset>
         <legend>Analyzer plugins</legend>

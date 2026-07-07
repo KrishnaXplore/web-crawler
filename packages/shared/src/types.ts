@@ -38,6 +38,22 @@ export interface JobConfig {
   readonly storeHtml: boolean;
   /** Analyzer plugins to run per page (M5 Step C); empty = none. */
   readonly plugins: readonly string[];
+  /** Optional callback URL notified when the job reaches a terminal state (M6 B). */
+  readonly webhookUrl?: string | null;
+}
+
+/**
+ * The body POSTed to a job's `webhookUrl` on termination (M6 Step B). Signed with
+ * `X-Crawler-Signature: sha256=HMAC(body, WEBHOOK_SECRET)` when a secret is set.
+ */
+export interface WebhookPayload {
+  readonly event: "job.completed" | "job.cancelled";
+  readonly jobId: string;
+  readonly seedUrl: string;
+  readonly status: string;
+  readonly pagesPersisted: number;
+  readonly startedAt: string;
+  readonly finishedAt: string;
 }
 
 /** A URL discovered during a crawl. `url` is always normalized. */

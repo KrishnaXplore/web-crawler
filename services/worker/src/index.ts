@@ -5,7 +5,7 @@
  * queue and coordinate through it (ADR-0003).
  */
 import { createServer } from "node:http";
-import { Worker } from "bullmq";
+import { Worker, UnrecoverableError } from "bullmq";
 import { loadEnv } from "@crawler/config";
 import { metricsText, contentType, pagesTotal, fetchDuration } from "@crawler/metrics";
 import {
@@ -16,14 +16,20 @@ import {
   clearJobState,
   isCancelled,
   acquireDomainSlot,
+  createWebhookQueue,
+  enqueueWebhook,
   CRAWL_QUEUE,
+  WEBHOOK_QUEUE,
   type CrawlJobData,
+  type WebhookJobData,
 } from "@crawler/queue";
 import {
   connectMongo,
   disconnectMongo,
+  getJob,
   getJobConfig,
   upsertPage,
+  countPages,
   markJobFinished,
 } from "@crawler/db";
 import { createBlobStore } from "@crawler/storage";
@@ -33,6 +39,8 @@ import {
   fetchPage,
   parseRobots,
   runPlugins,
+  deliverWebhook,
+  SsrfError,
   type CrawlDeps,
   type RobotsRules,
 } from "@crawler/core";
@@ -43,6 +51,8 @@ const UA = env.CRAWL_USER_AGENT;
 const connection = createRedis(); // dedicated connection for the BullMQ Worker
 const redis = createRedis(); // for queue add + our SADD / counters
 const queue = createCrawlQueue(redis);
+const webhookQueue = createWebhookQueue(redis);
+const webhookConnection = createRedis(); // BullMQ Workers each need a dedicated conn
 
 const blobStore = createBlobStore();
 let bucketEnsured = false; // lazily ensure the bucket only if a job stores HTML
@@ -226,8 +236,56 @@ async function finishJob(jobId: string): Promise<void> {
     await markJobFinished(jobId, cancelled ? "cancelled" : "completed");
     await clearJobState(redis, jobId);
     console.log(`✓ job ${jobId.slice(0, 8)} ${cancelled ? "cancelled" : "completed"}`);
+
+    // Webhook (M6 Step B): enqueue the delivery — never deliver inline, so job
+    // finalization is not coupled to a third party's uptime.
+    const job = await getJob(jobId);
+    if (job !== null && job.webhookUrl !== null) {
+      await enqueueWebhook(webhookQueue, {
+        url: job.webhookUrl,
+        payload: {
+          event: cancelled ? "job.cancelled" : "job.completed",
+          jobId,
+          seedUrl: job.seedUrl,
+          status: cancelled ? "cancelled" : "completed",
+          pagesPersisted: await countPages(jobId),
+          startedAt: job.createdAt,
+          finishedAt: new Date().toISOString(),
+        },
+      });
+    }
   }
 }
+
+/**
+ * Webhook delivery consumer (M6 Step B). A module in this process, not a service
+ * (ADR-0006). Failures throw → BullMQ retries with backoff → dead-letter, except an
+ * SSRF block, which is terminal by design (never retried).
+ */
+const webhookWorker = new Worker<WebhookJobData>(
+  WEBHOOK_QUEUE,
+  async (job) => {
+    try {
+      await deliverWebhook(job.data.url, job.data.payload, env.WEBHOOK_SECRET);
+      console.log(
+        `→ webhook ${job.data.payload.event} delivered for ` +
+          `${job.data.payload.jobId.slice(0, 8)}`,
+      );
+    } catch (err) {
+      if (err instanceof SsrfError) throw new UnrecoverableError(err.message);
+      throw err;
+    }
+  },
+  { connection: webhookConnection, concurrency: 2 },
+);
+
+webhookWorker.on("failed", (job, err) => {
+  if (!job) return;
+  console.error(
+    `webhook delivery failed (attempt ${job.attemptsMade}/${job.opts.attempts ?? 1}) ` +
+      `${job.data.url}: ${err.message}`,
+  );
+});
 
 await connectMongo();
 
@@ -280,9 +338,12 @@ async function shutdown(): Promise<void> {
   console.log("\nshutting down… (finishing in-flight URLs)");
   metricsServer.close();
   await worker.close(); // waits for active jobs to finish, releases locks
+  await webhookWorker.close();
   await queue.close();
+  await webhookQueue.close();
   await redis.quit();
   await connection.quit();
+  await webhookConnection.quit();
   await disconnectMongo();
   process.exit(0);
 }
