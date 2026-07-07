@@ -1,0 +1,43 @@
+{
+  "name": "web-intelligence-platform",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "crawl": "pnpm --filter @crawler/core build && tsx scripts/crawl.ts",
+    "seed": "pnpm -r build && tsx scripts/seed.ts",
+    "worker": "pnpm -r build && tsx services/worker/src/index.ts",
+    "api": "pnpm -r build && tsx services/api/src/index.ts",
+    "results": "pnpm --filter @crawler/db build && tsx scripts/results.ts",
+    "dlq": "pnpm --filter @crawler/queue build && tsx scripts/dlq.ts",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "redis:up": "docker compose up -d redis",
+    "redis:down": "docker compose down"
+  },
+  "dependencies": {
+    "@crawler/config": "workspace:*",
+    "@crawler/core": "workspace:*",
+    "@crawler/db": "workspace:*",
+    "@crawler/queue": "workspace:*",
+    "@crawler/shared": "workspace:*",
+    "@crawler/storage": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "pnpm": {
+    "overrides": {
+      "ioredis": "5.11.1"
+    }
+  }
+}

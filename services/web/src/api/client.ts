@@ -1,0 +1,66 @@
+// Typed client for the REST API. All calls go through the Vite /api proxy.
+
+export interface CreateJobInput {
+  seedUrl: string;
+  maxDepth: number;
+  maxPages: number;
+  sameHostOnly: boolean;
+  respectRobots: boolean;
+  storeHtml: boolean;
+  plugins: string[];
+}
+
+export interface JobStatus {
+  jobId: string;
+  seedUrl: string;
+  status: string;
+  maxDepth: number;
+  maxPages: number;
+  pagesPersisted: number;
+  pending: number;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface PageRow {
+  url: string;
+  status: number | null;
+  title: string | null;
+  depth: number;
+  discoveredLinks: number;
+  analysis: Record<string, unknown> | null;
+}
+
+const BASE = "/api";
+
+async function json<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export async function createJob(input: CreateJobInput): Promise<{ jobId: string }> {
+  return json(
+    await fetch(`${BASE}/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
+}
+
+export async function getJob(id: string): Promise<JobStatus> {
+  return json(await fetch(`${BASE}/jobs/${id}`));
+}
+
+export async function getPages(id: string): Promise<{ pages: PageRow[] }> {
+  return json(await fetch(`${BASE}/jobs/${id}/pages?limit=200`));
+}
+
+export function exportUrl(id: string, format: "json" | "csv"): string {
+  return `${BASE}/jobs/${id}/export?format=${format}`;
+}
+
+export const AVAILABLE_PLUGINS = ["seo", "tech", "security"] as const;
