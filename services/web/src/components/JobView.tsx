@@ -2,10 +2,13 @@ import { useEffect, useState } from "react";
 import {
   getJob,
   getPages,
+  cancelJob,
   exportUrl,
   type JobStatus,
   type PageRow,
 } from "../api/client";
+
+const TERMINAL = ["completed", "cancelled", "failed"];
 
 export function JobView({ jobId }: { jobId: string | null }) {
   const [job, setJob] = useState<JobStatus | null>(null);
@@ -28,7 +31,7 @@ export function JobView({ jobId }: { jobId: string | null }) {
           const { pages: p } = await getPages(jobId!);
           if (!stop) setPages(p);
         }
-        if (j.status !== "completed" && !stop) {
+        if (!TERMINAL.includes(j.status) && !stop) {
           setTimeout(tick, 1500);
         }
       } catch (err) {
@@ -52,6 +55,18 @@ export function JobView({ jobId }: { jobId: string | null }) {
       <h2>
         Job <code>{job.jobId.slice(0, 8)}</code>{" "}
         <span className={`badge ${job.status}`}>{job.status}</span>
+        {!TERMINAL.includes(job.status) && (
+          <button
+            className="cancel"
+            onClick={() => {
+              void cancelJob(job.jobId).catch((err: unknown) =>
+                setError(err instanceof Error ? err.message : "cancel failed"),
+              );
+            }}
+          >
+            Cancel
+          </button>
+        )}
       </h2>
       <div className="stats">
         <Stat label="seed" value={job.seedUrl} />

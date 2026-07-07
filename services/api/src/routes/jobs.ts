@@ -2,13 +2,14 @@ import { randomUUID } from "node:crypto";
 import express from "express";
 import { z } from "zod";
 import { normalizeUrl, type JobConfig } from "@crawler/shared";
-import { enqueueUrl } from "@crawler/queue";
+import { enqueueUrl, markCancelled } from "@crawler/queue";
 import {
   createJob,
   getJob,
   getPages,
   countPages,
   iteratePages,
+  markJobCancelling,
 } from "@crawler/db";
 import { validateBody } from "../middleware/validate.js";
 import { ssrfPrescreen } from "../middleware/ssrfPrescreen.js";
@@ -61,6 +62,29 @@ export function createJobsRouter(deps: AppDeps): express.Router {
       }
     },
   );
+
+  // POST /jobs/:id/cancel — stop a crawl mid-flight (M6 Step A, docs/phase6.md).
+  // Sets the Redis tombstone (workers no-op) + flips status to `cancelling`; the
+  // worker completion path lands the terminal `cancelled`. Idempotent while the
+  // job is live; a job already in a terminal state is a 409.
+  router.post("/:id/cancel", async (req, res, next) => {
+    try {
+      const job = await getJob(req.params.id);
+      if (job === null) {
+        res.status(404).json({ error: "job not found" });
+        return;
+      }
+      if (["completed", "cancelled", "failed"].includes(job.status)) {
+        res.status(409).json({ error: `job already ${job.status}` });
+        return;
+      }
+      await markCancelled(deps.redis, job.jobId);
+      await markJobCancelling(job.jobId);
+      res.status(202).json({ jobId: job.jobId, status: "cancelling" });
+    } catch (err) {
+      next(err);
+    }
+  });
 
   // GET /jobs/:id — status + live counts.
   router.get("/:id", async (req, res, next) => {

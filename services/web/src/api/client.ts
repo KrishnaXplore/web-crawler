@@ -55,6 +55,12 @@ export async function getJob(id: string): Promise<JobStatus> {
   return json(await fetch(`${BASE}/jobs/${id}`));
 }
 
+export async function cancelJob(
+  id: string,
+): Promise<{ jobId: string; status: string }> {
+  return json(await fetch(`${BASE}/jobs/${id}/cancel`, { method: "POST" }));
+}
+
 export async function getPages(id: string): Promise<{ pages: PageRow[] }> {
   return json(await fetch(`${BASE}/jobs/${id}/pages?limit=200`));
 }

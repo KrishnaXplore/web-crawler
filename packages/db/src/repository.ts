@@ -21,11 +21,34 @@ export async function createJob(input: JobRecordInput): Promise<void> {
   });
 }
 
+/**
+ * Finalize a job (idempotent — only from a non-terminal state). The completion path
+ * picks `cancelled` vs `completed` from the Redis tombstone (M6 Step A) — one code
+ * path, one branch, no second termination mechanism.
+ */
+export async function markJobFinished(
+  jobId: string,
+  status: "completed" | "cancelled",
+): Promise<void> {
+  await JobModel.updateOne(
+    { _id: jobId, status: { $in: ["pending", "running", "cancelling"] } },
+    { $set: { status, completedAt: new Date() } },
+  );
+}
+
 /** Flip a job's status to completed (idempotent — only from a non-terminal state). */
 export async function markJobCompleted(jobId: string): Promise<void> {
+  await markJobFinished(jobId, "completed");
+}
+
+/**
+ * First phase of cancel (M6 Step A): flag intent while in-flight URLs finish.
+ * The completion path lands the terminal `cancelled` state. Idempotent.
+ */
+export async function markJobCancelling(jobId: string): Promise<void> {
   await JobModel.updateOne(
     { _id: jobId, status: { $in: ["pending", "running"] } },
-    { $set: { status: "completed", completedAt: new Date() } },
+    { $set: { status: "cancelling" } },
   );
 }
 

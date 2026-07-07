@@ -14,6 +14,7 @@ import {
   enqueueUrl,
   decrPending,
   clearJobState,
+  isCancelled,
   acquireDomainSlot,
   CRAWL_QUEUE,
   type CrawlJobData,
@@ -23,7 +24,7 @@ import {
   disconnectMongo,
   getJobConfig,
   upsertPage,
-  markJobCompleted,
+  markJobFinished,
 } from "@crawler/db";
 import { createBlobStore } from "@crawler/storage";
 import { type JobConfig } from "@crawler/shared";
@@ -89,6 +90,15 @@ const worker = new Worker<CrawlJobData>(
   CRAWL_QUEUE,
   async (job) => {
     const data = job.data;
+
+    // Cancelled job (M6 Step A): drain as a no-op. Returning normally still flows
+    // through the completed event → pending decrement, so completion accounting
+    // (and therefore termination) is unchanged.
+    if (await isCancelled(redis, data.jobId)) {
+      pagesTotal.inc({ outcome: "cancelled" });
+      return;
+    }
+
     const cfg = await loadJobConfig(data.jobId);
     if (cfg === null) {
       console.warn(`[${data.jobId}] no config found; dropping ${data.url}`);
@@ -210,9 +220,12 @@ const worker = new Worker<CrawlJobData>(
 async function finishJob(jobId: string): Promise<void> {
   const remaining = await decrPending(redis, jobId);
   if (remaining === 0) {
-    await markJobCompleted(jobId);
+    // Finalize to cancelled if the tombstone is set, else completed (M6 Step A) —
+    // same termination path, one branch. Read the flag BEFORE clearJobState wipes it.
+    const cancelled = await isCancelled(redis, jobId);
+    await markJobFinished(jobId, cancelled ? "cancelled" : "completed");
     await clearJobState(redis, jobId);
-    console.log(`✓ job ${jobId.slice(0, 8)} completed`);
+    console.log(`✓ job ${jobId.slice(0, 8)} ${cancelled ? "cancelled" : "completed"}`);
   }
 }
 

@@ -17,7 +17,9 @@ const jobSchema = new Schema(
     plugins: { type: [String], default: [] },
     status: {
       type: String,
-      enum: ["pending", "running", "completed", "failed"],
+      // cancelling → cancelled is the two-phase cancel (M6): between the API call
+      // and the queue draining, in-flight URLs are still finishing.
+      enum: ["pending", "running", "cancelling", "completed", "cancelled", "failed"],
       default: "pending",
     },
     createdAt: { type: Date, default: Date.now },

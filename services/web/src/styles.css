@@ -70,6 +70,18 @@ button:disabled { opacity: 0.6; cursor: default; }
 .badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; text-transform: uppercase; }
 .badge.completed { background: rgba(46,160,67,.2); color: var(--ok); }
 .badge.pending, .badge.running { background: rgba(176,136,0,.2); color: var(--pending); }
+.badge.cancelling, .badge.cancelled, .badge.failed { background: rgba(255,107,107,.15); color: #ff6b6b; }
+
+button.cancel {
+  width: auto;
+  margin: 0 0 0 10px;
+  padding: 3px 12px;
+  font-size: 12px;
+  background: transparent;
+  color: #ff6b6b;
+  border: 1px solid rgba(255,107,107,.5);
+  vertical-align: middle;
+}
 
 .stats { display: flex; gap: 16px; flex-wrap: wrap; margin: 12px 0; }
 .stat { display: flex; flex-direction: column; }
