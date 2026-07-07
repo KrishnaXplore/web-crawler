@@ -1,0 +1,352 @@
+# OpenAPI spec for the REST API (services/api). Hand-maintained for now and kept in
+# lockstep with the zod schemas in services/api/src/routes/*.ts — the plan of record
+# (gap-analysis Tier 0/2) is to GENERATE this from those schemas so it cannot drift.
+openapi: 3.0.3
+info:
+  title: Web Intelligence Platform API
+  version: 0.1.0
+  description: |
+    Submit crawls, watch their progress, browse/search results, export, cancel.
+    Authentication: if the server is configured with an API_KEY, every /jobs and
+    /search request must carry it in the X-API-Key header; without that config the
+    API is open (local dev).
+servers:
+  - url: http://localhost:3000
+
+tags:
+  - name: jobs
+  - name: search
+  - name: ops
+
+security:
+  - apiKey: []
+
+paths:
+  /jobs:
+    post:
+      tags: [jobs]
+      summary: Submit a crawl
+      description: |
+        Validates the request (zod), pre-screens seed and webhook URLs for
+        obviously-internal addresses (the authoritative SSRF guard runs at fetch
+        time in the worker), creates the durable Job record, and enqueues the seed.
+        Returns immediately; the crawl runs asynchronously.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateJobRequest"
+      responses:
+        "202":
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobId: { type: string, format: uuid }
+                  seedUrl: { type: string, format: uri }
+                  config: { $ref: "#/components/schemas/JobConfig" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /jobs/{id}:
+    get:
+      tags: [jobs]
+      summary: Job status and live counts
+      parameters:
+        - $ref: "#/components/parameters/jobId"
+      responses:
+        "200":
+          description: The job with live progress counters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobStatus"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /jobs/{id}/cancel:
+    post:
+      tags: [jobs]
+      summary: Cancel a running crawl
+      description: |
+        Sets the cancellation tombstone (workers drain queued URLs as no-ops) and
+        flips status to `cancelling`; the worker completion path finalizes to
+        `cancelled`. Idempotent while the job is live. Pages persisted before the
+        cancel remain queryable and exportable.
+      parameters:
+        - $ref: "#/components/parameters/jobId"
+      responses:
+        "202":
+          description: Cancellation initiated (or already in progress)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobId: { type: string }
+                  status: { type: string, enum: [cancelling] }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Job already in a terminal state (completed/cancelled/failed)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /jobs/{id}/pages:
+    get:
+      tags: [jobs]
+      summary: Persisted page results
+      parameters:
+        - $ref: "#/components/parameters/jobId"
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 500 }
+      responses:
+        "200":
+          description: Pages sorted by (depth, url)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobId: { type: string }
+                  count: { type: integer }
+                  pages:
+                    type: array
+                    items: { $ref: "#/components/schemas/PageRow" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /jobs/{id}/export:
+    get:
+      tags: [jobs]
+      summary: Export a job's results (streamed)
+      description: Streams from a MongoDB cursor — bounded memory for large jobs.
+      parameters:
+        - $ref: "#/components/parameters/jobId"
+        - name: format
+          in: query
+          schema: { type: string, enum: [json, csv], default: json }
+      responses:
+        "200":
+          description: The full result set
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PageExport" }
+            text/csv:
+              schema: { type: string }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /search:
+    get:
+      tags: [search]
+      summary: Full-text search over crawled pages
+      description: MongoDB text index over page title + description.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+        - name: jobId
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 500 }
+      responses:
+        "200":
+          description: Matches ranked by text score
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  q: { type: string }
+                  count: { type: integer }
+                  results:
+                    type: array
+                    items: { $ref: "#/components/schemas/PageRow" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /health:
+    get:
+      tags: [ops]
+      summary: Liveness
+      security: []
+      responses:
+        "200":
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok] }
+
+  /metrics:
+    get:
+      tags: [ops]
+      summary: Prometheus metrics
+      security: []
+      responses:
+        "200":
+          description: Prometheus exposition format
+          content:
+            text/plain: { schema: { type: string } }
+
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Enforced only when the server has API_KEY configured.
+
+  parameters:
+    jobId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    BadRequest:
+      description: Validation failed or URL pre-screened as internal
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing/wrong X-API-Key (only when API_KEY is configured)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: No such job
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+
+    CreateJobRequest:
+      type: object
+      required: [seedUrl]
+      properties:
+        seedUrl:
+          type: string
+          format: uri
+          description: http(s) URL to start from
+        maxDepth: { type: integer, minimum: 0, maximum: 10, default: 1 }
+        maxPages: { type: integer, minimum: 1, maximum: 1000, default: 50 }
+        sameHostOnly: { type: boolean, default: true }
+        respectRobots: { type: boolean, default: true }
+        storeHtml:
+          type: boolean
+          default: false
+          description: Store each page's raw HTML in blob storage
+        plugins:
+          type: array
+          items: { type: string, enum: [seo, tech, security, metadata] }
+          default: []
+        webhookUrl:
+          type: string
+          format: uri
+          description: |
+            Optional http(s) callback POSTed once when the job reaches a terminal
+            state (see WebhookPayload). Signed with X-Crawler-Signature when the
+            server has WEBHOOK_SECRET configured. Delivery goes through the same
+            SSRF guard as the crawler.
+
+    JobConfig:
+      type: object
+      properties:
+        maxDepth: { type: integer }
+        maxPages: { type: integer }
+        sameHostOnly: { type: boolean }
+        respectRobots: { type: boolean }
+        storeHtml: { type: boolean }
+        plugins: { type: array, items: { type: string } }
+        webhookUrl: { type: string, nullable: true }
+
+    JobStatus:
+      type: object
+      properties:
+        jobId: { type: string, format: uuid }
+        seedUrl: { type: string, format: uri }
+        status:
+          type: string
+          enum: [pending, running, cancelling, completed, cancelled, failed]
+        maxDepth: { type: integer }
+        maxPages: { type: integer }
+        sameHostOnly: { type: boolean }
+        respectRobots: { type: boolean }
+        storeHtml: { type: boolean }
+        webhookUrl: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+        pagesPersisted:
+          type: integer
+          description: Pages written to MongoDB so far
+        pending:
+          type: integer
+          description: Outstanding URLs (queued + in-flight); 0 at termination
+
+    PageRow:
+      type: object
+      properties:
+        url: { type: string, format: uri }
+        status: { type: integer, nullable: true }
+        title: { type: string, nullable: true }
+        depth: { type: integer }
+        discoveredLinks: { type: integer }
+        analysis:
+          type: object
+          nullable: true
+          description: Keyed by plugin name (seo/tech/security/metadata)
+          additionalProperties: true
+
+    PageExport:
+      type: object
+      properties:
+        url: { type: string, format: uri }
+        finalUrl: { type: string, nullable: true }
+        status: { type: integer, nullable: true }
+        title: { type: string, nullable: true }
+        description: { type: string, nullable: true }
+        depth: { type: integer }
+        discoveredLinks: { type: integer }
+
+    WebhookPayload:
+      type: object
+      description: |
+        Body POSTed to a job's webhookUrl on termination. When WEBHOOK_SECRET is
+        set, the X-Crawler-Signature header is "sha256=" + hex(HMAC_SHA256(raw
+        body, secret)) — verify over the exact raw bytes.
+      properties:
+        event: { type: string, enum: [job.completed, job.cancelled] }
+        jobId: { type: string, format: uuid }
+        seedUrl: { type: string, format: uri }
+        status: { type: string, enum: [completed, cancelled] }
+        pagesPersisted: { type: integer }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
