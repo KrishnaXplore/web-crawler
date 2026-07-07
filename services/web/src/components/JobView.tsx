@@ -122,8 +122,13 @@ function Analysis({ a }: { a: Record<string, unknown> }) {
   const seo = a.seo as { h1Count?: number } | undefined;
   const tech = a.tech as { detected?: string[] } | undefined;
   const sec = a.security as { score?: string } | undefined;
+  const meta = a.metadata as
+    | { robots?: { noindex?: boolean }; isCanonical?: boolean | null }
+    | undefined;
   if (seo?.h1Count !== undefined) parts.push(`h1:${seo.h1Count}`);
   if (tech?.detected?.length) parts.push(tech.detected.join(","));
   if (sec?.score) parts.push(`sec:${sec.score}`);
+  if (meta?.robots?.noindex) parts.push("noindex");
+  if (meta?.isCanonical === false) parts.push("non-canonical");
   return <span>{parts.join(" · ") || "—"}</span>;
 }
