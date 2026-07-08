@@ -1,8 +1,10 @@
 import { loadEnv } from "@crawler/config";
+import { createLogger } from "@crawler/logger";
 import { createRedis, createCrawlQueue } from "@crawler/queue";
 import { connectMongo, disconnectMongo } from "@crawler/db";
 import { createApp } from "./app.js";
 
+const log = createLogger("api");
 const env = loadEnv();
 const redis = createRedis();
 const queue = createCrawlQueue(redis);
@@ -10,7 +12,7 @@ await connectMongo();
 
 const app = createApp({ redis, queue });
 const server = app.listen(env.API_PORT, () => {
-  console.log(`api listening on :${env.API_PORT}`);
+  log.info({ port: env.API_PORT }, "api listening");
 });
 
 async function shutdown(): Promise<void> {

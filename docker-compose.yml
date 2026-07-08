@@ -47,6 +47,52 @@ services:
       timeout: 5s
       retries: 5
 
+  # ---- Application services (M7 Step C) ----------------------------------
+  # Plain `docker compose up` still starts infra only (local-dev workflow).
+  # `docker compose --profile app up --build` runs the whole product.
+
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    profiles: [app]
+    environment:
+      REDIS_URL: redis://redis:6379
+      MONGO_URL: mongodb://mongo:27017/crawler
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+    ports:
+      - "3000:3000"
+    depends_on:
+      redis: { condition: service_healthy }
+      mongo: { condition: service_healthy }
+
+  worker:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    profiles: [app]
+    environment:
+      REDIS_URL: redis://redis:6379
+      MONGO_URL: mongodb://mongo:27017/crawler
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+    depends_on:
+      redis: { condition: service_healthy }
+      mongo: { condition: service_healthy }
+      minio: { condition: service_healthy }
+
+  web:
+    build:
+      context: .
+      dockerfile: services/web/Dockerfile
+    profiles: [app]
+    # Host port 8090 (8080/8081 commonly taken on dev machines).
+    ports:
+      - "8090:80"
+    depends_on:
+      - api
+
 volumes:
   redis-data:
   mongo-data:

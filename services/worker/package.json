@@ -5,13 +5,14 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@crawler/config": "workspace:*",
     "@crawler/core": "workspace:*",
     "@crawler/db": "workspace:*",
+    "@crawler/logger": "workspace:^",
     "@crawler/metrics": "workspace:*",
     "@crawler/queue": "workspace:*",
     "@crawler/shared": "workspace:*",

@@ -7,6 +7,7 @@
 import { createServer } from "node:http";
 import { Worker, UnrecoverableError } from "bullmq";
 import { loadEnv } from "@crawler/config";
+import { createLogger } from "@crawler/logger";
 import { metricsText, contentType, pagesTotal, fetchDuration } from "@crawler/metrics";
 import {
   createRedis,
@@ -45,6 +46,7 @@ import {
   type RobotsRules,
 } from "@crawler/core";
 
+const log = createLogger("worker");
 const env = loadEnv();
 const UA = env.CRAWL_USER_AGENT;
 
@@ -111,7 +113,7 @@ const worker = new Worker<CrawlJobData>(
 
     const cfg = await loadJobConfig(data.jobId);
     if (cfg === null) {
-      console.warn(`[${data.jobId}] no config found; dropping ${data.url}`);
+      log.warn({ jobId: data.jobId, url: data.url }, "no config found; dropping url");
       return;
     }
 
@@ -183,18 +185,17 @@ const worker = new Worker<CrawlJobData>(
       });
     }
 
-    const tag =
-      result.outcome === "ok"
-        ? String(result.status)
-        : result.outcome === "skipped-robots"
-          ? "robots"
-          : result.outcome === "blocked-ssrf"
-            ? "ssrf"
-            : "ERR";
-    const title = result.title ? `  “${result.title}”` : "";
-    console.log(
-      `[${data.jobId.slice(0, 8)}] d${data.depth} ${tag.padStart(6)} ` +
-        `${data.url}  (${result.links.length} links)${title}`,
+    log.info(
+      {
+        jobId: data.jobId,
+        url: data.url,
+        depth: data.depth,
+        outcome: result.outcome,
+        status: result.status,
+        links: result.links.length,
+        title: result.title,
+      },
+      "crawled",
     );
 
     // A crawl error throws → BullMQ retries with backoff, then dead-letters.
@@ -235,7 +236,7 @@ async function finishJob(jobId: string): Promise<void> {
     const cancelled = await isCancelled(redis, jobId);
     await markJobFinished(jobId, cancelled ? "cancelled" : "completed");
     await clearJobState(redis, jobId);
-    console.log(`✓ job ${jobId.slice(0, 8)} ${cancelled ? "cancelled" : "completed"}`);
+    log.info({ jobId, final: cancelled ? "cancelled" : "completed" }, "job finished");
 
     // Webhook (M6 Step B): enqueue the delivery — never deliver inline, so job
     // finalization is not coupled to a third party's uptime.
@@ -267,9 +268,9 @@ const webhookWorker = new Worker<WebhookJobData>(
   async (job) => {
     try {
       await deliverWebhook(job.data.url, job.data.payload, env.WEBHOOK_SECRET);
-      console.log(
-        `→ webhook ${job.data.payload.event} delivered for ` +
-          `${job.data.payload.jobId.slice(0, 8)}`,
+      log.info(
+        { jobId: job.data.payload.jobId, event: job.data.payload.event, url: job.data.url },
+        "webhook delivered",
       );
     } catch (err) {
       if (err instanceof SsrfError) throw new UnrecoverableError(err.message);
@@ -281,9 +282,15 @@ const webhookWorker = new Worker<WebhookJobData>(
 
 webhookWorker.on("failed", (job, err) => {
   if (!job) return;
-  console.error(
-    `webhook delivery failed (attempt ${job.attemptsMade}/${job.opts.attempts ?? 1}) ` +
-      `${job.data.url}: ${err.message}`,
+  log.error(
+    {
+      jobId: job.data.payload.jobId,
+      url: job.data.url,
+      attempt: job.attemptsMade,
+      attempts: job.opts.attempts ?? 1,
+      err,
+    },
+    "webhook delivery failed",
   );
 });
 
@@ -305,13 +312,11 @@ const metricsServer = createServer((req, res) => {
   }
 });
 metricsServer.listen(env.WORKER_METRICS_PORT, () =>
-  console.log(`worker metrics on :${env.WORKER_METRICS_PORT}/metrics`),
+  log.info({ port: env.WORKER_METRICS_PORT }, "worker metrics listening"),
 );
 
 worker.on("ready", () =>
-  console.log(
-    `worker ready (concurrency ${env.WORKER_CONCURRENCY}) — waiting for jobs…`,
-  ),
+  log.info({ concurrency: env.WORKER_CONCURRENCY }, "worker ready — waiting for jobs"),
 );
 
 worker.on("completed", (job) => {
@@ -324,9 +329,7 @@ worker.on("failed", (job, err) => {
   if (job.attemptsMade >= attempts) {
     // Terminal failure → dead-lettered (kept in BullMQ's failed set) and counted
     // as finished so it never wedges completion.
-    console.error(
-      `[${job.data.jobId.slice(0, 8)}] DLQ ${job.data.url}: ${err.message}`,
-    );
+    log.error({ jobId: job.data.jobId, url: job.data.url, err }, "dead-lettered");
     void finishJob(job.data.jobId);
   }
 });
@@ -335,7 +338,7 @@ let shuttingDown = false;
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log("\nshutting down… (finishing in-flight URLs)");
+  log.info("shutting down — finishing in-flight URLs");
   metricsServer.close();
   await worker.close(); // waits for active jobs to finish, releases locks
   await webhookWorker.close();
