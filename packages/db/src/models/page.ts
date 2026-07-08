@@ -21,6 +21,10 @@ const pageSchema = new Schema(
     depth: { type: Number, required: true },
     parentUrl: { type: String, default: null },
     discoveredLinks: { type: Number, default: 0 },
+    // Link scope + timing (M8 Step C).
+    internalLinks: { type: Number, default: 0 },
+    externalLinks: { type: Number, default: 0 },
+    responseTimeMs: { type: Number, default: null },
     // Blob pointer (M3 Step B): the HTML lives in object storage, not here.
     htmlKey: { type: String, default: null },
     htmlBytes: { type: Number, default: null },

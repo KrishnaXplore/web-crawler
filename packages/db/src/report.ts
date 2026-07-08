@@ -17,9 +17,13 @@ export interface ReportPage {
   readonly status: number | null;
   readonly discoveredLinks: number;
   readonly parentUrl: string | null;
+  readonly internalLinks?: number;
+  readonly externalLinks?: number;
+  readonly responseTimeMs?: number | null;
   readonly h1Count?: number;
   readonly hasMetaDescription?: boolean;
   readonly imagesMissingAlt?: number;
+  readonly wordCount?: number;
   readonly techDetected?: readonly string[];
   readonly securityScore?: string;
 }
@@ -30,6 +34,10 @@ export interface HealthReport {
   readonly brokenPages: number;
   readonly totalDiscoveredLinks: number;
   readonly avgLinksPerPage: number;
+  readonly internalLinks: number;
+  readonly externalLinks: number;
+  readonly avgResponseTimeMs: number | null;
+  readonly avgWordCount: number | null;
   readonly pagesMissingH1: number;
   readonly pagesMissingMetaDescription: number;
   readonly imagesMissingAlt: number;
@@ -62,6 +70,12 @@ export function reduceReport(
 ): HealthReport {
   const statusBreakdown = { "2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0, other: 0 };
   let totalLinks = 0;
+  let internalLinks = 0;
+  let externalLinks = 0;
+  let respTotal = 0;
+  let respCount = 0;
+  let wordTotal = 0;
+  let wordCount = 0;
   let missingH1 = 0;
   let missingMeta = 0;
   let imagesMissingAlt = 0;
@@ -72,6 +86,10 @@ export function reduceReport(
   for (const p of pages) {
     statusBreakdown[statusClass(p.status)] += 1;
     totalLinks += p.discoveredLinks;
+    internalLinks += p.internalLinks ?? 0;
+    externalLinks += p.externalLinks ?? 0;
+    if (typeof p.responseTimeMs === "number") (respTotal += p.responseTimeMs), (respCount += 1);
+    if (typeof p.wordCount === "number") (wordTotal += p.wordCount), (wordCount += 1);
     if (p.h1Count === 0) missingH1 += 1;
     if (p.hasMetaDescription === false) missingMeta += 1;
     if (typeof p.imagesMissingAlt === "number") imagesMissingAlt += p.imagesMissingAlt;
@@ -107,6 +125,10 @@ export function reduceReport(
     brokenPages,
     totalDiscoveredLinks: totalLinks,
     avgLinksPerPage: pagesCrawled === 0 ? 0 : Math.round((totalLinks / pagesCrawled) * 10) / 10,
+    internalLinks,
+    externalLinks,
+    avgResponseTimeMs: respCount === 0 ? null : Math.round(respTotal / respCount),
+    avgWordCount: wordCount === 0 ? null : Math.round(wordTotal / wordCount),
     pagesMissingH1: missingH1,
     pagesMissingMetaDescription: missingMeta,
     imagesMissingAlt,
@@ -129,7 +151,10 @@ export async function buildReport(jobId: string): Promise<HealthReport | null> {
 
   const cursor = PageModel.find(
     { jobId },
-    { status: 1, discoveredLinks: 1, parentUrl: 1, analysis: 1, _id: 0 },
+    {
+      status: 1, discoveredLinks: 1, parentUrl: 1, analysis: 1,
+      internalLinks: 1, externalLinks: 1, responseTimeMs: 1, _id: 0,
+    },
   )
     .lean()
     .cursor();
@@ -141,9 +166,13 @@ export async function buildReport(jobId: string): Promise<HealthReport | null> {
       status: d.status ?? null,
       discoveredLinks: d.discoveredLinks ?? 0,
       parentUrl: d.parentUrl ?? null,
+      internalLinks: d.internalLinks,
+      externalLinks: d.externalLinks,
+      responseTimeMs: d.responseTimeMs,
       h1Count: a.seo?.h1Count,
       hasMetaDescription: a.seo?.hasMetaDescription,
       imagesMissingAlt: a.seo?.imagesMissingAlt,
+      wordCount: a.seo?.wordCount,
       techDetected: a.tech?.detected,
       securityScore: a.security?.score,
     });

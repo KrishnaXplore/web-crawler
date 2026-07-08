@@ -1,5 +1,5 @@
 import { normalizeUrl } from "@crawler/shared";
-import { extractLinks } from "./extractLinks.js";
+import { extractLinks, countLinkScope } from "./extractLinks.js";
 import { parseMeta } from "./parse.js";
 import { SsrfError } from "./ssrfGuard.js";
 import type { FetchResult } from "./fetch.js";
@@ -30,6 +30,11 @@ export interface CrawlPageResult {
   readonly title: string | null;
   readonly description: string | null;
   readonly links: string[];
+  /** Outgoing links split by scope (M8 Step C). */
+  readonly internalLinks: number;
+  readonly externalLinks: number;
+  /** Server response time in ms, or null for non-fetched outcomes (M8 Step C). */
+  readonly responseTimeMs: number | null;
   /** Raw HTML body when the page is HTML, else null (for blob storage). */
   readonly html: string | null;
   /** Response headers (lowercased) — for analyzer plugins. */
@@ -76,6 +81,9 @@ export async function crawlUrl(
   const links = isHtml
     ? extractLinks(res.body, url, { sameHostOnly: options.sameHostOnly })
     : [];
+  const scope = isHtml
+    ? countLinkScope(res.body, url)
+    : { internal: 0, external: 0 };
 
   return {
     url,
@@ -85,6 +93,9 @@ export async function crawlUrl(
     title: meta.title,
     description: meta.description,
     links,
+    internalLinks: scope.internal,
+    externalLinks: scope.external,
+    responseTimeMs: res.responseTimeMs,
     html: isHtml ? res.body : null,
     headers: res.headers,
     outcome: "ok",
@@ -100,6 +111,9 @@ function empty(url: string, outcome: CrawlOutcome): CrawlPageResult {
     title: null,
     description: null,
     links: [],
+    internalLinks: 0,
+    externalLinks: 0,
+    responseTimeMs: null,
     html: null,
     headers: {},
     outcome,

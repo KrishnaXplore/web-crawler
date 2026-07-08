@@ -102,6 +102,31 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /jobs/{id}/report:
+    get:
+      tags: [jobs]
+      summary: Website Health Report
+      description: |
+        Aggregates the job's persisted pages into an actionable summary (M8). Works on
+        completed and cancelled (partial) jobs. Computed on read via a Mongo aggregation
+        over a lean projection — no stored report.
+      parameters:
+        - $ref: "#/components/parameters/jobId"
+      responses:
+        "200":
+          description: The health report
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobId: { type: string }
+                  report: { $ref: "#/components/schemas/HealthReport" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /jobs/{id}/pages:
     get:
       tags: [jobs]
@@ -335,6 +360,40 @@ components:
         description: { type: string, nullable: true }
         depth: { type: integer }
         discoveredLinks: { type: integer }
+
+    HealthReport:
+      type: object
+      description: Aggregated website health metrics for one crawl (M8).
+      properties:
+        pagesCrawled: { type: integer }
+        statusBreakdown:
+          type: object
+          properties:
+            "2xx": { type: integer }
+            "3xx": { type: integer }
+            "4xx": { type: integer }
+            "5xx": { type: integer }
+            other: { type: integer }
+        brokenPages: { type: integer }
+        totalDiscoveredLinks: { type: integer }
+        avgLinksPerPage: { type: number }
+        internalLinks: { type: integer }
+        externalLinks: { type: integer }
+        avgResponseTimeMs: { type: integer, nullable: true }
+        avgWordCount: { type: integer, nullable: true }
+        pagesMissingH1: { type: integer }
+        pagesMissingMetaDescription: { type: integer }
+        imagesMissingAlt: { type: integer }
+        technology: { type: array, items: { type: string } }
+        securityScore: { type: string, nullable: true }
+        mostLinkedPage:
+          type: object
+          nullable: true
+          properties:
+            url: { type: string }
+            inLinks: { type: integer }
+        crawlDurationMs: { type: integer, nullable: true }
+        robotsRespected: { type: boolean }
 
     WebhookPayload:
       type: object

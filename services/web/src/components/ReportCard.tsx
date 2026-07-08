@@ -40,6 +40,13 @@ export function ReportCard({ jobId, status }: { jobId: string; status: string })
         <Metric label="Broken pages" value={report.brokenPages} state={ok(report.brokenPages === 0)} />
         <Metric label="Crawl duration" value={dur} state="ok" />
         <Metric label="Avg links / page" value={report.avgLinksPerPage} state="ok" />
+        <Metric label="Internal / external links" value={`${report.internalLinks} / ${report.externalLinks}`} state="ok" />
+        <Metric
+          label="Avg response"
+          value={report.avgResponseTimeMs === null ? "—" : `${report.avgResponseTimeMs} ms`}
+          state="ok"
+        />
+        <Metric label="Avg words / page" value={report.avgWordCount ?? "—"} state="ok" />
         <Metric label="Security score" value={report.securityScore ?? "—"} state="ok" />
         <Metric label="Technology" value={report.technology.join(", ") || "—"} state="ok" />
         <Metric label="Missing H1" value={`${report.pagesMissingH1} pages`} state={ok(report.pagesMissingH1 === 0)} />

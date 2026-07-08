@@ -111,6 +111,9 @@ export interface PageInput {
   readonly depth: number;
   readonly parentUrl: string | null;
   readonly discoveredLinks: number;
+  readonly internalLinks?: number;
+  readonly externalLinks?: number;
+  readonly responseTimeMs?: number | null;
   readonly htmlKey?: string | null;
   readonly htmlBytes?: number | null;
   readonly analysis?: Record<string, unknown> | null;

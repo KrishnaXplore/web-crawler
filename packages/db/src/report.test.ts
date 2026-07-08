@@ -65,6 +65,27 @@ describe("reduceReport (M8 Step A)", () => {
     expect(r.technology[0]).toBe("React"); // seen 3× vs jQuery 1×
   });
 
+  it("aggregates link scope, response time, and word count (Step C signals)", () => {
+    const r = reduceReport(
+      [
+        page({ internalLinks: 6, externalLinks: 2, responseTimeMs: 100, wordCount: 300 }),
+        page({ internalLinks: 4, externalLinks: 0, responseTimeMs: 200, wordCount: 500 }),
+      ],
+      meta,
+    );
+    expect(r.internalLinks).toBe(10);
+    expect(r.externalLinks).toBe(2);
+    expect(r.avgResponseTimeMs).toBe(150);
+    expect(r.avgWordCount).toBe(400);
+  });
+
+  it("leaves response time / word count null when unmeasured", () => {
+    const r = reduceReport([page({}), page({})], meta);
+    expect(r.avgResponseTimeMs).toBeNull();
+    expect(r.avgWordCount).toBeNull();
+    expect(r.internalLinks).toBe(0);
+  });
+
   it("sums images missing alt across pages", () => {
     const r = reduceReport(
       [page({ imagesMissingAlt: 2 }), page({ imagesMissingAlt: 5 }), page({})],

@@ -10,12 +10,18 @@ export const seoPlugin: AnalyzerPlugin = {
     imgs.each((_, el) => {
       if (!($(el).attr("alt") ?? "").trim()) missingAlt += 1;
     });
+    // Visible word count (M8 Step C): body text minus script/style noise.
+    const bodyText = $("body").clone().find("script, style, noscript").remove().end().text();
+    const wordCount = bodyText.split(/\s+/).filter((w) => w.length > 0).length;
     return {
       titleLength: title.length,
       h1Count: $("h1").length,
       hasMetaDescription: $('meta[name="description"]').length > 0,
       images: imgs.length,
       imagesMissingAlt: missingAlt,
+      wordCount,
+      scripts: $("script").length,
+      stylesheets: $('link[rel="stylesheet"]').length,
     };
   },
 };

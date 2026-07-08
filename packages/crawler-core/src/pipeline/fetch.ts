@@ -27,6 +27,8 @@ export interface FetchResult {
   readonly body: string;
   /** True if the body was truncated at the size cap. */
   readonly truncated: boolean;
+  /** Wall-clock time from request to body read, ms (M8 Step C). */
+  readonly responseTimeMs: number;
 }
 
 export const DEFAULT_USER_AGENT =
@@ -46,6 +48,7 @@ export async function fetchPage(
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
+  const startedAt = Date.now();
   try {
     const res = await safeFetch(url, {
       headers: { "user-agent": opts.userAgent, accept: "text/html,*/*" },
@@ -64,6 +67,7 @@ export async function fetchPage(
       headers,
       body: text,
       truncated,
+      responseTimeMs: Date.now() - startedAt,
     };
   } finally {
     clearTimeout(timer);

@@ -38,6 +38,10 @@ export interface HealthReport {
   brokenPages: number;
   totalDiscoveredLinks: number;
   avgLinksPerPage: number;
+  internalLinks: number;
+  externalLinks: number;
+  avgResponseTimeMs: number | null;
+  avgWordCount: number | null;
   pagesMissingH1: number;
   pagesMissingMetaDescription: number;
   imagesMissingAlt: number;

@@ -55,3 +55,39 @@ export function extractLinks(
 
   return [...out];
 }
+
+/**
+ * Count a page's outgoing links split by scope (M8 Step C) — internal (same host as
+ * the page) vs external. Unlike extractLinks, this counts ALL links regardless of the
+ * crawl's sameHostOnly setting, so the report reflects the page's real link profile.
+ * De-duped by normalized URL.
+ */
+export function countLinkScope(
+  html: string,
+  pageUrl: string,
+): { internal: number; external: number } {
+  const $ = cheerio.load(html);
+  const pageHost = hostOf(pageUrl);
+  const self = normalizeUrl(pageUrl);
+  const seen = new Set<string>();
+  let internal = 0;
+  let external = 0;
+
+  $("a[href]").each((_, el) => {
+    const href = $(el).attr("href");
+    if (!href) return;
+    let normalized: string;
+    try {
+      normalized = normalizeUrl(href, pageUrl);
+    } catch (err) {
+      if (err instanceof InvalidUrlError) return;
+      throw err;
+    }
+    if (normalized === self || seen.has(normalized)) return;
+    seen.add(normalized);
+    if (hostOf(normalized) === pageHost) internal += 1;
+    else external += 1;
+  });
+
+  return { internal, external };
+}
