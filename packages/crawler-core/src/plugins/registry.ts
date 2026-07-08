@@ -11,6 +11,10 @@ export interface RunPluginsArgs {
   readonly html: string;
   readonly headers: Record<string, string>;
   readonly status: number;
+  /** True iff the crawl carried auth context (M10). Defaults to false. */
+  readonly authenticated?: boolean;
+  /** Per-plugin operator config (M10), keyed by plugin name. */
+  readonly options?: Record<string, unknown>;
 }
 
 /**
@@ -35,6 +39,9 @@ export function runPlugins(
         $,
         headers: args.headers,
         status: args.status,
+        body: args.html,
+        authenticated: args.authenticated ?? false,
+        options: args.options,
       });
     } catch (err) {
       out[name] = { error: err instanceof Error ? err.message : "failed" };

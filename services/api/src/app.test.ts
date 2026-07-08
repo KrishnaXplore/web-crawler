@@ -141,6 +141,7 @@ describe("report (M8 Step A)", () => {
       technology: ["jQuery"],
       securityScore: "3/5",
       mostLinkedPage: { url: "https://site/support", inLinks: 5 },
+      exposure: null,
       crawlDurationMs: 2400,
       robotsRespected: true,
     });

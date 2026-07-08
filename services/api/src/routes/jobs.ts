@@ -33,6 +33,10 @@ const createJobSchema = z.object({
     .refine((u) => /^https?:\/\//i.test(u), "must be http(s)")
     .optional(),
   renderMode: z.enum(["http", "browser"]).default("http"),
+  // Exposure audit (M10). requestHeaders is a secret (session/token) for the
+  // authenticated baseline pass; exposurePatterns are custom sensitive-data regexes.
+  requestHeaders: z.record(z.string(), z.string()).optional(),
+  exposurePatterns: z.array(z.string()).max(50).default([]),
 });
 
 export function createJobsRouter(deps: AppDeps): express.Router {
@@ -56,6 +60,8 @@ export function createJobsRouter(deps: AppDeps): express.Router {
           plugins: body.plugins,
           webhookUrl: body.webhookUrl ?? null,
           renderMode: body.renderMode,
+          requestHeaders: body.requestHeaders ?? null,
+          exposurePatterns: body.exposurePatterns,
         };
         const jobId = randomUUID();
         await createJob({ jobId, seedUrl: seed, ...config });
@@ -69,7 +75,13 @@ export function createJobsRouter(deps: AppDeps): express.Router {
           { jobId, url: seed, depth: 0, parentUrl: null },
           config.maxPages,
         );
-        res.status(202).json({ jobId, seedUrl: seed, config });
+        // Never echo the secret auth headers back in the response.
+        const { requestHeaders: _redacted, ...safeConfig } = config;
+        res.status(202).json({
+          jobId,
+          seedUrl: seed,
+          config: { ...safeConfig, authenticated: config.requestHeaders != null },
+        });
       } catch (err) {
         next(err);
       }

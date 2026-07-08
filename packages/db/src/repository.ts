@@ -20,6 +20,8 @@ export async function createJob(input: JobRecordInput): Promise<void> {
     plugins: input.plugins,
     webhookUrl: input.webhookUrl ?? null,
     renderMode: input.renderMode ?? "http",
+    requestHeaders: input.requestHeaders ?? null,
+    exposurePatterns: input.exposurePatterns ?? [],
   });
 }
 
@@ -101,6 +103,9 @@ export async function getJobConfig(jobId: string): Promise<JobConfig | null> {
     plugins: doc.plugins ?? [],
     webhookUrl: doc.webhookUrl ?? null,
     renderMode: (doc.renderMode as "http" | "browser" | undefined) ?? "http",
+    requestHeaders:
+      (doc.requestHeaders as Record<string, string> | null | undefined) ?? null,
+    exposurePatterns: doc.exposurePatterns ?? [],
   };
 }
 

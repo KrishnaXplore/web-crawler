@@ -45,6 +45,17 @@ export interface JobConfig {
    * renderer service executes the page in headless Chromium (JS SPAs, screenshots).
    */
   readonly renderMode?: "http" | "browser";
+  /**
+   * Exposure audit context (M10). Extra request headers (e.g. a session Cookie) for
+   * the *authenticated baseline* pass. A secret: read by workers, but never returned
+   * by the public API and never stored on Page results.
+   */
+  readonly requestHeaders?: Record<string, string> | null;
+  /**
+   * Operator-supplied sensitive-data regexes for the exposure plugin (M10), e.g. a
+   * roll-number format. Source strings; compiled per page.
+   */
+  readonly exposurePatterns?: readonly string[];
 }
 
 /**

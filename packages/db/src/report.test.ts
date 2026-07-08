@@ -94,6 +94,48 @@ describe("reduceReport (M8 Step A)", () => {
     expect(r.imagesMissingAlt).toBe(7);
   });
 
+  it("aggregates exposure: max risk, category counts, unauth-sensitive URLs (M10)", () => {
+    const r = reduceReport(
+      [
+        page({
+          url: "https://site/results?roll=1",
+          exposure: {
+            riskScore: "high",
+            authenticated: false,
+            findings: { sensitiveData: { severity: "high", count: 40 } },
+          },
+        }),
+        page({
+          url: "https://site/docs",
+          exposure: {
+            riskScore: "medium",
+            authenticated: false,
+            findings: { documents: { severity: "medium", count: 3 } },
+          },
+        }),
+        page({
+          url: "https://site/private",
+          exposure: {
+            riskScore: "info",
+            authenticated: true, // behind auth → NOT a leak
+            findings: { sensitiveData: { severity: "info", count: 10 } },
+          },
+        }),
+      ],
+      meta,
+    );
+    expect(r.exposure).not.toBeNull();
+    expect(r.exposure!.maxRisk).toBe("high");
+    expect(r.exposure!.categoryCounts).toEqual({ sensitiveData: 2, documents: 1 });
+    // Only the unauthenticated sensitive-data page is a leak.
+    expect(r.exposure!.unauthSensitiveUrls).toEqual(["https://site/results?roll=1"]);
+  });
+
+  it("exposure is null when the plugin didn't run", () => {
+    const r = reduceReport([page({}), page({})], meta);
+    expect(r.exposure).toBeNull();
+  });
+
   it("is graceful on an empty crawl", () => {
     const r = reduceReport([], meta);
     expect(r.pagesCrawled).toBe(0);

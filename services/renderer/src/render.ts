@@ -6,6 +6,8 @@ import { isRequestAllowed } from "./ssrf.js";
 export interface RenderOptions {
   readonly userAgent: string;
   readonly timeoutMs: number;
+  /** Extra request headers (M10 exposure audit) — session Cookie / Authorization. */
+  readonly requestHeaders?: Record<string, string>;
 }
 
 /**
@@ -24,7 +26,10 @@ export async function renderPage(
     throw new SsrfError(new URL(url).hostname, "blocked before navigation");
   }
 
-  const context = await browser.newContext({ userAgent: opts.userAgent });
+  const context = await browser.newContext({
+    userAgent: opts.userAgent,
+    extraHTTPHeaders: opts.requestHeaders,
+  });
   const startedAt = Date.now();
   try {
     // Vet every sub-resource the page tries to fetch (same list as the HTTP guard).

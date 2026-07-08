@@ -48,6 +48,11 @@ export interface HealthReport {
   technology: string[];
   securityScore: string | null;
   mostLinkedPage: { url: string; inLinks: number } | null;
+  exposure: {
+    maxRisk: "none" | "info" | "low" | "medium" | "high";
+    categoryCounts: Record<string, number>;
+    unauthSensitiveUrls: string[];
+  } | null;
   crawlDurationMs: number | null;
   robotsRespected: boolean;
 }
@@ -94,4 +99,10 @@ export function exportUrl(id: string, format: "json" | "csv"): string {
   return `${BASE}/jobs/${id}/export?format=${format}`;
 }
 
-export const AVAILABLE_PLUGINS = ["seo", "tech", "security", "metadata"] as const;
+export const AVAILABLE_PLUGINS = [
+  "seo",
+  "tech",
+  "security",
+  "metadata",
+  "exposure",
+] as const;

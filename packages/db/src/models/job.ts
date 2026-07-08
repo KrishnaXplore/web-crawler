@@ -19,6 +19,10 @@ const jobSchema = new Schema(
     webhookUrl: { type: String, default: null },
     // Fetch mode (M9): "browser" routes the job to the renderer service.
     renderMode: { type: String, enum: ["http", "browser"], default: "http" },
+    // Exposure audit (M10): auth headers for the baseline pass (secret; never returned
+    // by the public API) + custom sensitive-data patterns for the exposure plugin.
+    requestHeaders: { type: Schema.Types.Mixed, default: null },
+    exposurePatterns: { type: [String], default: [] },
     status: {
       type: String,
       // cancelling → cancelled is the two-phase cancel (M6): between the API call

@@ -70,8 +70,52 @@ export function ReportCard({ jobId, status }: { jobId: string; status: string })
           />
         )}
       </div>
+
+      {report.exposure && <ExposurePanel exposure={report.exposure} />}
     </div>
   );
+}
+
+function ExposurePanel({
+  exposure,
+}: {
+  exposure: NonNullable<HealthReport["exposure"]>;
+}) {
+  const leaks = exposure.unauthSensitiveUrls;
+  const risky = exposure.maxRisk === "high" || exposure.maxRisk === "medium";
+  return (
+    <div className="report" style={{ marginTop: 12 }}>
+      <h3>
+        Exposure Report{" "}
+        <span className={`badge ${risky ? "cancelled" : "completed"}`}>
+          risk: {exposure.maxRisk}
+        </span>
+      </h3>
+      <div className="report-grid">
+        {Object.entries(exposure.categoryCounts).map(([cat, n]) => (
+          <Metric key={cat} label={cat} value={`${n} pages`} state={ok(!risky)} />
+        ))}
+      </div>
+      {leaks.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <strong className="error">
+            ⚠ Sensitive data returned WITHOUT authentication ({leaks.length}):
+          </strong>
+          <ul>
+            {leaks.slice(0, 20).map((u) => (
+              <li key={u}>
+                <code>{u}</code>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+
+  function ok(good: boolean) {
+    return good ? "ok" : "warn";
+  }
 }
 
 function Metric({ label, value, state }: { label: string; value: string | number; state: "ok" | "warn" }) {

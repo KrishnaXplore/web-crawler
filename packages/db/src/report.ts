@@ -12,8 +12,11 @@ import { JobModel } from "./models/job.js";
  * large job doesn't load full documents into memory.
  */
 
+type ExposureSeverity = "info" | "low" | "medium" | "high";
+
 /** The minimal per-page shape the reducer needs. */
 export interface ReportPage {
+  readonly url?: string;
   readonly status: number | null;
   readonly discoveredLinks: number;
   readonly parentUrl: string | null;
@@ -26,6 +29,20 @@ export interface ReportPage {
   readonly wordCount?: number;
   readonly techDetected?: readonly string[];
   readonly securityScore?: string;
+  /** Exposure plugin output (M10), if the job ran it. */
+  readonly exposure?: {
+    readonly riskScore?: ExposureSeverity | "none";
+    readonly authenticated?: boolean;
+    readonly findings?: Record<string, { severity: ExposureSeverity; count: number }>;
+  };
+}
+
+/** Aggregated exposure section of the report (M10). */
+export interface ExposureSummary {
+  readonly maxRisk: ExposureSeverity | "none";
+  readonly categoryCounts: Record<string, number>;
+  /** URLs that returned sensitive data on an UNauthenticated request — the leaks. */
+  readonly unauthSensitiveUrls: string[];
 }
 
 export interface HealthReport {
@@ -44,6 +61,8 @@ export interface HealthReport {
   readonly technology: readonly string[];
   readonly securityScore: string | null;
   readonly mostLinkedPage: { url: string; inLinks: number } | null;
+  /** Exposure audit summary (M10); null if the exposure plugin didn't run. */
+  readonly exposure: ExposureSummary | null;
   // From the job record, not the pages:
   readonly crawlDurationMs: number | null;
   readonly robotsRespected: boolean;
@@ -82,6 +101,11 @@ export function reduceReport(
   const techCounts = new Map<string, number>();
   const securityCounts = new Map<string, number>();
   const inLinks = new Map<string, number>(); // parentUrl → in-degree
+  const RISK_RANK: Record<string, number> = { none: -1, info: 0, low: 1, medium: 2, high: 3 };
+  let sawExposure = false;
+  let maxRisk: ExposureSeverity | "none" = "none";
+  const categoryCounts: Record<string, number> = {};
+  const unauthSensitiveUrls: string[] = [];
 
   for (const p of pages) {
     statusBreakdown[statusClass(p.status)] += 1;
@@ -99,6 +123,20 @@ export function reduceReport(
       securityCounts.set(p.securityScore, (securityCounts.get(p.securityScore) ?? 0) + 1);
     if (p.parentUrl !== null)
       inLinks.set(p.parentUrl, (inLinks.get(p.parentUrl) ?? 0) + 1);
+
+    // Exposure aggregation (M10).
+    if (p.exposure) {
+      sawExposure = true;
+      const risk = p.exposure.riskScore ?? "none";
+      if ((RISK_RANK[risk] ?? -1) > (RISK_RANK[maxRisk] ?? -1))
+        maxRisk = risk as ExposureSeverity | "none";
+      const findings = p.exposure.findings ?? {};
+      for (const cat of Object.keys(findings))
+        categoryCounts[cat] = (categoryCounts[cat] ?? 0) + 1;
+      // The actionable leak: sensitive data returned on an unauthenticated request.
+      if (findings.sensitiveData && p.exposure.authenticated === false && p.url)
+        unauthSensitiveUrls.push(p.url);
+    }
   }
 
   const pagesCrawled = pages.length;
@@ -135,6 +173,9 @@ export function reduceReport(
     technology,
     securityScore,
     mostLinkedPage,
+    exposure: sawExposure
+      ? { maxRisk, categoryCounts, unauthSensitiveUrls }
+      : null,
     crawlDurationMs: meta.crawlDurationMs,
     robotsRespected: meta.robotsRespected,
   };
@@ -152,7 +193,7 @@ export async function buildReport(jobId: string): Promise<HealthReport | null> {
   const cursor = PageModel.find(
     { jobId },
     {
-      status: 1, discoveredLinks: 1, parentUrl: 1, analysis: 1,
+      url: 1, status: 1, discoveredLinks: 1, parentUrl: 1, analysis: 1,
       internalLinks: 1, externalLinks: 1, responseTimeMs: 1, _id: 0,
     },
   )
@@ -163,6 +204,7 @@ export async function buildReport(jobId: string): Promise<HealthReport | null> {
   for await (const d of cursor) {
     const a = (d.analysis ?? {}) as Record<string, any>;
     pages.push({
+      url: d.url,
       status: d.status ?? null,
       discoveredLinks: d.discoveredLinks ?? 0,
       parentUrl: d.parentUrl ?? null,
@@ -175,6 +217,7 @@ export async function buildReport(jobId: string): Promise<HealthReport | null> {
       wordCount: a.seo?.wordCount,
       techDetected: a.tech?.detected,
       securityScore: a.security?.score,
+      exposure: a.exposure,
     });
   }
 

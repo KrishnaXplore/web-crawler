@@ -1,4 +1,5 @@
 import type { AnalyzerPlugin } from "./types.js";
+import { exposurePlugin } from "./exposure.js";
 
 /** SEO signals from the DOM. */
 export const seoPlugin: AnalyzerPlugin = {
@@ -146,4 +147,5 @@ export const BUILTIN_PLUGINS: readonly AnalyzerPlugin[] = [
   techPlugin,
   securityPlugin,
   metadataPlugin,
+  exposurePlugin,
 ];

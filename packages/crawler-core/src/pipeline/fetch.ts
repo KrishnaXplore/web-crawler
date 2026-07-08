@@ -14,6 +14,12 @@ export interface FetchOptions {
   readonly userAgent: string;
   readonly timeoutMs: number;
   readonly maxBytes: number;
+  /**
+   * Extra request headers (M10) — e.g. a session Cookie / Authorization for the
+   * authenticated baseline pass of an exposure audit. Held in-flight only; never
+   * persisted on the Page.
+   */
+  readonly requestHeaders?: Record<string, string>;
 }
 
 export interface FetchResult {
@@ -51,7 +57,11 @@ export async function fetchPage(
   const startedAt = Date.now();
   try {
     const res = await safeFetch(url, {
-      headers: { "user-agent": opts.userAgent, accept: "text/html,*/*" },
+      headers: {
+        "user-agent": opts.userAgent,
+        accept: "text/html,*/*",
+        ...opts.requestHeaders,
+      },
       redirect: "follow",
       signal: controller.signal,
     });

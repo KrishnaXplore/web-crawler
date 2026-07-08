@@ -91,12 +91,6 @@ async function robotsFor(origin: string): Promise<RobotsRules> {
   return rules;
 }
 
-const deps: CrawlDeps = {
-  fetch: (url) =>
-    fetchPage(url, { userAgent: UA, timeoutMs: 10_000, maxBytes: 3_000_000 }),
-  robotsFor,
-};
-
 const worker = new Worker<CrawlJobData>(
   CRAWL_QUEUE,
   async (job) => {
@@ -129,6 +123,19 @@ const worker = new Worker<CrawlJobData>(
       await new Promise((r) => setTimeout(r, waitMs));
       waitMs = await acquireDomainSlot(redis, hostname, intervalMs);
     }
+
+    // Build deps per-job so the exposure audit's auth headers (M10) apply. When set,
+    // this is the *authenticated baseline* pass; when null, the unauthenticated pass.
+    const deps: CrawlDeps = {
+      fetch: (url) =>
+        fetchPage(url, {
+          userAgent: UA,
+          timeoutMs: 10_000,
+          maxBytes: 3_000_000,
+          requestHeaders: cfg.requestHeaders ?? undefined,
+        }),
+      robotsFor,
+    };
 
     const endTimer = fetchDuration.startTimer();
     const result = await crawlUrl(data.url, deps, {
@@ -164,6 +171,8 @@ const worker = new Worker<CrawlJobData>(
               html: result.html,
               headers: result.headers,
               status: result.status ?? 0,
+              authenticated: cfg.requestHeaders != null,
+              options: { exposure: { patterns: cfg.exposurePatterns ?? [] } },
             })
           : null;
 

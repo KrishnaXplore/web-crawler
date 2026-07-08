@@ -8,6 +8,22 @@ export interface AnalyzerInput {
   /** Response headers, lowercased. */
   readonly headers: Record<string, string>;
   readonly status: number;
+  /**
+   * Raw response body — some analyzers (M10 exposure) scan text that isn't DOM
+   * (inline JSON, script contents).
+   */
+  readonly body: string;
+  /**
+   * True iff the crawl job supplied auth context (requestHeaders). The exposure
+   * plugin (M10) escalates sensitive-data findings that appear when this is false —
+   * data reachable with no auth is the actual leak.
+   */
+  readonly authenticated: boolean;
+  /**
+   * Operator-supplied config for analyzers (M10) — e.g. custom sensitive-data
+   * regexes. Keyed by plugin name.
+   */
+  readonly options?: Record<string, unknown>;
 }
 
 /**

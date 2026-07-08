@@ -130,6 +130,7 @@ const worker = new Worker<CrawlJobData>(
         renderPage(url, browser, {
           userAgent: UA,
           timeoutMs: env.RENDER_TIMEOUT_MS,
+          requestHeaders: cfg.requestHeaders ?? undefined,
         }),
       robotsFor,
     };
@@ -166,6 +167,8 @@ const worker = new Worker<CrawlJobData>(
               html: result.html,
               headers: result.headers,
               status: result.status ?? 0,
+              authenticated: cfg.requestHeaders != null,
+              options: { exposure: { patterns: cfg.exposurePatterns ?? [] } },
             })
           : null;
 
