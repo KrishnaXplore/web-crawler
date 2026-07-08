@@ -9,6 +9,7 @@ import {
   getPages,
   countPages,
   iteratePages,
+  buildReport,
   markJobCancelling,
 } from "@crawler/db";
 import { validateBody } from "../middleware/validate.js";
@@ -107,6 +108,22 @@ export function createJobsRouter(deps: AppDeps): express.Router {
         pagesPersisted,
         pending: pendingRaw === null ? 0 : Number(pendingRaw),
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /jobs/:id/report — Website Health Report (M8 Step A). Aggregates the job's
+  // persisted pages into an actionable summary. Works on completed and cancelled
+  // (partial) jobs alike.
+  router.get("/:id/report", async (req, res, next) => {
+    try {
+      const report = await buildReport(req.params.id);
+      if (report === null) {
+        res.status(404).json({ error: "job not found" });
+        return;
+      }
+      res.json({ jobId: req.params.id, report });
     } catch (err) {
       next(err);
     }
