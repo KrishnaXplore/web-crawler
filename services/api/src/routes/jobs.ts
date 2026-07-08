@@ -32,6 +32,7 @@ const createJobSchema = z.object({
     .url()
     .refine((u) => /^https?:\/\//i.test(u), "must be http(s)")
     .optional(),
+  renderMode: z.enum(["http", "browser"]).default("http"),
 });
 
 export function createJobsRouter(deps: AppDeps): express.Router {
@@ -54,11 +55,16 @@ export function createJobsRouter(deps: AppDeps): express.Router {
           storeHtml: body.storeHtml,
           plugins: body.plugins,
           webhookUrl: body.webhookUrl ?? null,
+          renderMode: body.renderMode,
         };
         const jobId = randomUUID();
         await createJob({ jobId, seedUrl: seed, ...config });
+        // Route the seed to the render queue for browser-mode jobs (M9); the renderer
+        // then spreads children onto its own queue. Same enqueueUrl dedup primitive.
+        const targetQueue =
+          body.renderMode === "browser" ? deps.renderQueue : deps.queue;
         await enqueueUrl(
-          deps.queue,
+          targetQueue,
           deps.redis,
           { jobId, url: seed, depth: 0, parentUrl: null },
           config.maxPages,

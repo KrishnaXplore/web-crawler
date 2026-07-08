@@ -1,4 +1,6 @@
 import { envSchema, type Env } from "./schema.js";
+import { join } from "node:path";
+import { existsSync } from "node:fs";
 
 let cached: Env | null = null;
 
@@ -10,10 +12,18 @@ let cached: Env | null = null;
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   if (cached) return cached;
 
-  // Best-effort: load a .env from the current working directory if present
-  // (Node >=20.12). Real env vars already set take precedence.
+  // Best-effort: load a .env from the current working directory, OR the
+  // workspace root.
   try {
-    process.loadEnvFile?.();
+    let envPath = join(process.cwd(), ".env");
+    if (!existsSync(envPath)) {
+      // check workspace root (two levels up from services/* or packages/*)
+      const rootEnv = join(process.cwd(), "..", "..", ".env");
+      if (existsSync(rootEnv)) {
+        envPath = rootEnv;
+      }
+    }
+    process.loadEnvFile?.(envPath);
   } catch {
     /* no .env file — fine, defaults + real env apply */
   }

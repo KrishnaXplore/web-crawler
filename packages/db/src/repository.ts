@@ -19,6 +19,7 @@ export async function createJob(input: JobRecordInput): Promise<void> {
     storeHtml: input.storeHtml,
     plugins: input.plugins,
     webhookUrl: input.webhookUrl ?? null,
+    renderMode: input.renderMode ?? "http",
   });
 }
 
@@ -63,6 +64,7 @@ export interface JobRecord {
   readonly respectRobots: boolean;
   readonly storeHtml: boolean;
   readonly webhookUrl: string | null;
+  readonly renderMode: "http" | "browser";
   readonly createdAt: string;
   readonly completedAt: string | null;
 }
@@ -81,6 +83,7 @@ export async function getJob(jobId: string): Promise<JobRecord | null> {
     respectRobots: d.respectRobots,
     storeHtml: d.storeHtml ?? false,
     webhookUrl: d.webhookUrl ?? null,
+    renderMode: (d.renderMode as "http" | "browser" | undefined) ?? "http",
     createdAt: (d.createdAt ?? new Date()).toISOString(),
     completedAt: d.completedAt ? d.completedAt.toISOString() : null,
   };
@@ -97,6 +100,7 @@ export async function getJobConfig(jobId: string): Promise<JobConfig | null> {
     storeHtml: doc.storeHtml ?? false,
     plugins: doc.plugins ?? [],
     webhookUrl: doc.webhookUrl ?? null,
+    renderMode: (doc.renderMode as "http" | "browser" | undefined) ?? "http",
   };
 }
 
@@ -159,6 +163,7 @@ export async function getPages(jobId: string, limit = 50): Promise<PageRow[]> {
     analysis: (d.analysis as Record<string, unknown> | null) ?? null,
   }));
 }
+
 
 export function countPages(jobId: string): Promise<number> {
   return PageModel.countDocuments({ jobId });

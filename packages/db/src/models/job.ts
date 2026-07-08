@@ -17,6 +17,8 @@ const jobSchema = new Schema(
     plugins: { type: [String], default: [] },
     // Optional terminal-state callback (M6 Step B).
     webhookUrl: { type: String, default: null },
+    // Fetch mode (M9): "browser" routes the job to the renderer service.
+    renderMode: { type: String, enum: ["http", "browser"], default: "http" },
     status: {
       type: String,
       // cancelling → cancelled is the two-phase cancel (M6): between the API call

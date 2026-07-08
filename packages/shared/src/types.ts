@@ -40,6 +40,11 @@ export interface JobConfig {
   readonly plugins: readonly string[];
   /** Optional callback URL notified when the job reaches a terminal state (M6 B). */
   readonly webhookUrl?: string | null;
+  /**
+   * How pages are fetched (M9): "http" = plain fetch (default); "browser" = the
+   * renderer service executes the page in headless Chromium (JS SPAs, screenshots).
+   */
+  readonly renderMode?: "http" | "browser";
 }
 
 /**

@@ -23,6 +23,10 @@ export const envSchema = z.object({
   WEBHOOK_SECRET: z.string().optional(),
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(4),
   WORKER_METRICS_PORT: z.coerce.number().int().positive().default(9464),
+  /** Renderer service (M9): browser pages are heavy — keep concurrency small. */
+  RENDER_CONCURRENCY: z.coerce.number().int().positive().default(2),
+  RENDERER_METRICS_PORT: z.coerce.number().int().positive().default(9465),
+  RENDER_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
   CRAWL_DELAY_MS: z.coerce.number().int().nonnegative().default(200),
   CRAWL_USER_AGENT: z
     .string()

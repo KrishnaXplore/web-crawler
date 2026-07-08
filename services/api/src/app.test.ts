@@ -34,6 +34,7 @@ const job = (status: string) => ({
   respectRobots: true,
   storeHtml: false,
   webhookUrl: null,
+  renderMode: "http" as const,
   createdAt: new Date().toISOString(),
   completedAt: null,
 });

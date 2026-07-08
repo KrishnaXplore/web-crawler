@@ -1,27 +1,27 @@
 /**
- * Stateless crawl worker (M2 Step B — see docs/phase2b.md). Pulls URL jobs from the
- * BullMQ queue, crawls each (M1/A pipeline), and enqueues discovered links back —
- * deduped — with depth+1. Run as many of these as you like; they share the Redis
- * queue and coordinate through it (ADR-0003).
+ * Renderer service (M9 — docs/phase9.md). A second stateless queue consumer, like the
+ * worker, but each URL is executed in headless Chromium so JavaScript-rendered pages
+ * and screenshots are captured. Routed to only for jobs with renderMode:"browser".
+ * Shares all Redis coordination state with the worker, so completion/cancel/webhooks
+ * work identically (finishUrl in @crawler/queue owns that contract).
  */
 import { createServer } from "node:http";
-import { Worker, UnrecoverableError } from "bullmq";
+import { Worker } from "bullmq";
+import { chromium, type Browser } from "playwright";
 import { loadEnv } from "@crawler/config";
 import { createLogger } from "@crawler/logger";
 import { metricsText, contentType, pagesTotal, fetchDuration } from "@crawler/metrics";
 import {
   createRedis,
-  createCrawlQueue,
+  createRenderQueue,
+  createWebhookQueue,
   enqueueUrl,
+  enqueueWebhook,
   finishUrl,
   isCancelled,
   acquireDomainSlot,
-  createWebhookQueue,
-  enqueueWebhook,
-  CRAWL_QUEUE,
-  WEBHOOK_QUEUE,
+  RENDER_QUEUE,
   type CrawlJobData,
-  type WebhookJobData,
 } from "@crawler/queue";
 import {
   connectMongo,
@@ -39,26 +39,24 @@ import {
   fetchPage,
   parseRobots,
   runPlugins,
-  deliverWebhook,
-  SsrfError,
   type CrawlDeps,
   type RobotsRules,
 } from "@crawler/core";
+import { renderPage } from "./render.js";
 
-const log = createLogger("worker");
+const log = createLogger("renderer");
 const env = loadEnv();
 const UA = env.CRAWL_USER_AGENT;
 
-const connection = createRedis(); // dedicated connection for the BullMQ Worker
-const redis = createRedis(); // for queue add + our SADD / counters
-const queue = createCrawlQueue(redis);
+const redis = createRedis();
+const renderQueue = createRenderQueue(redis);
 const webhookQueue = createWebhookQueue(redis);
-const webhookConnection = createRedis(); // BullMQ Workers each need a dedicated conn
 
 const blobStore = createBlobStore();
-let bucketEnsured = false; // lazily ensure the bucket only if a job stores HTML
+let bucketEnsured = false;
 
-// Per-worker cache of job config, loaded from Mongo on first use.
+let browser: Browser;
+
 const configCache = new Map<string, JobConfig | null>();
 async function loadJobConfig(jobId: string): Promise<JobConfig | null> {
   if (configCache.has(jobId)) return configCache.get(jobId) ?? null;
@@ -67,8 +65,7 @@ async function loadJobConfig(jobId: string): Promise<JobConfig | null> {
   return cfg;
 }
 
-// In-memory robots cache. Recomputable state, so worker statelessness holds
-// (ADR-0003) — a fresh worker just re-fetches robots.txt as needed.
+// Robots is fetched over plain HTTP (no need to render robots.txt) — same as worker.
 const robotsCache = new Map<string, RobotsRules>();
 async function robotsFor(origin: string): Promise<RobotsRules> {
   const cached = robotsCache.get(origin);
@@ -91,33 +88,31 @@ async function robotsFor(origin: string): Promise<RobotsRules> {
   return rules;
 }
 
-const deps: CrawlDeps = {
-  fetch: (url) =>
-    fetchPage(url, { userAgent: UA, timeoutMs: 10_000, maxBytes: 3_000_000 }),
-  robotsFor,
-};
+// Construct the Worker BEFORE any top-level await (matching the worker service), so
+// its autorun run-loop / blocking connection starts immediately. The browser is
+// launched below; the handler awaits `browserReady` before using it, so there is no
+// undefined-browser race.
+let markBrowserReady: () => void;
+const browserReady = new Promise<void>((resolve) => (markBrowserReady = resolve));
 
+const connection = createRedis();
 const worker = new Worker<CrawlJobData>(
-  CRAWL_QUEUE,
+  RENDER_QUEUE,
   async (job) => {
     const data = job.data;
+    await browserReady;
 
-    // Cancelled job (M6 Step A): drain as a no-op. Returning normally still flows
-    // through the completed event → pending decrement, so completion accounting
-    // (and therefore termination) is unchanged.
     if (await isCancelled(redis, data.jobId)) {
       pagesTotal.inc({ outcome: "cancelled" });
       return;
     }
-
     const cfg = await loadJobConfig(data.jobId);
     if (cfg === null) {
       log.warn({ jobId: data.jobId, url: data.url }, "no config found; dropping url");
       return;
     }
 
-    // Per-domain rate limiting (ADR-0004), shared across workers via Redis. The
-    // interval is the robots Crawl-delay (when respected) or the configured default.
+    // Per-domain rate limiting (shared with the worker via the same Redis keys).
     const { origin, hostname } = new URL(data.url);
     let intervalMs = env.CRAWL_DELAY_MS;
     if (cfg.respectRobots) {
@@ -130,6 +125,15 @@ const worker = new Worker<CrawlJobData>(
       waitMs = await acquireDomainSlot(redis, hostname, intervalMs);
     }
 
+    const deps: CrawlDeps = {
+      fetch: (url) =>
+        renderPage(url, browser, {
+          userAgent: UA,
+          timeoutMs: env.RENDER_TIMEOUT_MS,
+        }),
+      robotsFor,
+    };
+
     const endTimer = fetchDuration.startTimer();
     const result = await crawlUrl(data.url, deps, {
       sameHostOnly: cfg.sameHostOnly,
@@ -138,25 +142,23 @@ const worker = new Worker<CrawlJobData>(
     endTimer();
     pagesTotal.inc({ outcome: result.outcome });
 
-    // Persist page metadata (workflow Phase 5). Idempotent on (jobId, url).
     if (result.outcome === "ok") {
-      // Metadata/blob split: bytes → MinIO (opt-in), only the key → Mongo.
+      if (!bucketEnsured) {
+        await blobStore.ensureBucket();
+        bucketEnsured = true;
+      }
+
       let htmlKey: string | null = null;
       let htmlBytes: number | null = null;
       if (cfg.storeHtml && result.html !== null) {
-        if (!bucketEnsured) {
-          await blobStore.ensureBucket();
-          bucketEnsured = true;
-        }
-        const put = await blobStore.putBlob(
-          result.html,
-          result.contentType ?? "text/html",
-        );
+        const put = await blobStore.putBlob(result.html, result.contentType ?? "text/html");
         htmlKey = put.key;
         htmlBytes = put.bytes;
       }
 
-      // Analyzer plugins (M5 Step C): run the enabled ones over the page.
+
+
+      // cheerio plugins over the rendered DOM.
       const analysis =
         result.html !== null
           ? runPlugins(cfg.plugins, {
@@ -188,51 +190,27 @@ const worker = new Worker<CrawlJobData>(
     }
 
     log.info(
-      {
-        jobId: data.jobId,
-        url: data.url,
-        depth: data.depth,
-        outcome: result.outcome,
-        status: result.status,
-        links: result.links.length,
-        title: result.title,
-      },
-      "crawled",
+      { jobId: data.jobId, url: data.url, depth: data.depth, outcome: result.outcome,
+        status: result.status, links: result.links.length },
+      "rendered",
     );
 
-    // A crawl error throws → BullMQ retries with backoff, then dead-letters.
-    // (robots-skip / over-budget return normally and are not retried.)
-    if (result.outcome === "error") {
-      throw new Error(result.error ?? "crawl failed");
-    }
+    if (result.outcome === "error") throw new Error(result.error ?? "render failed");
 
     if (result.outcome === "ok" && data.depth < cfg.maxDepth) {
       for (const link of result.links) {
         await enqueueUrl(
-          queue,
+          renderQueue,
           redis,
-          {
-            jobId: data.jobId,
-            url: link,
-            depth: data.depth + 1,
-            parentUrl: data.url,
-          },
+          { jobId: data.jobId, url: link, depth: data.depth + 1, parentUrl: data.url },
           cfg.maxPages,
         );
       }
     }
   },
-  { connection, concurrency: env.WORKER_CONCURRENCY },
+  { connection, concurrency: env.RENDER_CONCURRENCY },
 );
 
-/**
- * Reference-counted completion detection (M4). The ordering-critical core lives in
- * finishUrl (packages/queue, shared with the renderer since M9); this service
- * contributes the finalize hook: persist terminal status + enqueue the webhook
- * (M6 Step B — never deliver inline, so finalization is not coupled to a third
- * party's uptime). Runs in Worker events (not the handler) so retries don't
- * double-count.
- */
 async function finishJob(jobId: string): Promise<void> {
   await finishUrl(redis, jobId, async (cancelled) => {
     await markJobFinished(jobId, cancelled ? "cancelled" : "completed");
@@ -255,46 +233,16 @@ async function finishJob(jobId: string): Promise<void> {
   });
 }
 
-/**
- * Webhook delivery consumer (M6 Step B). A module in this process, not a service
- * (ADR-0006). Failures throw → BullMQ retries with backoff → dead-letter, except an
- * SSRF block, which is terminal by design (never retried).
- */
-const webhookWorker = new Worker<WebhookJobData>(
-  WEBHOOK_QUEUE,
-  async (job) => {
-    try {
-      await deliverWebhook(job.data.url, job.data.payload, env.WEBHOOK_SECRET);
-      log.info(
-        { jobId: job.data.payload.jobId, event: job.data.payload.event, url: job.data.url },
-        "webhook delivered",
-      );
-    } catch (err) {
-      if (err instanceof SsrfError) throw new UnrecoverableError(err.message);
-      throw err;
-    }
-  },
-  { connection: webhookConnection, concurrency: 2 },
-);
-
-webhookWorker.on("failed", (job, err) => {
+worker.on("completed", (job) => void finishJob(job.data.jobId));
+worker.on("failed", (job, err) => {
   if (!job) return;
-  log.error(
-    {
-      jobId: job.data.payload.jobId,
-      url: job.data.url,
-      attempt: job.attemptsMade,
-      attempts: job.opts.attempts ?? 1,
-      err,
-    },
-    "webhook delivery failed",
-  );
+  const attempts = job.opts.attempts ?? 1;
+  if (job.attemptsMade >= attempts) {
+    log.error({ jobId: job.data.jobId, url: job.data.url, err }, "dead-lettered");
+    void finishJob(job.data.jobId);
+  }
 });
 
-await connectMongo();
-
-// A worker has no HTTP surface of its own, so a tiny server exposes metrics/health
-// for Prometheus to scrape (workflow Phase 7).
 const metricsServer = createServer((req, res) => {
   if (req.url === "/metrics") {
     void metricsText().then((text) => {
@@ -308,42 +256,38 @@ const metricsServer = createServer((req, res) => {
     res.end();
   }
 });
-metricsServer.listen(env.WORKER_METRICS_PORT, () =>
-  log.info({ port: env.WORKER_METRICS_PORT }, "worker metrics listening"),
+metricsServer.on("error", (err) =>
+  log.error({ err }, "metrics server error (does not stop the worker)"),
+);
+metricsServer.listen(env.RENDERER_METRICS_PORT, () =>
+  log.info({ port: env.RENDERER_METRICS_PORT }, "renderer metrics listening"),
 );
 
+worker.on("error", (err) => log.error({ err }, "worker error"));
 worker.on("ready", () =>
-  log.info({ concurrency: env.WORKER_CONCURRENCY }, "worker ready — waiting for jobs"),
+  log.info({ concurrency: env.RENDER_CONCURRENCY }, "renderer ready — waiting for jobs"),
 );
 
-worker.on("completed", (job) => {
-  void finishJob(job.data.jobId);
-});
-
-worker.on("failed", (job, err) => {
-  if (!job) return;
-  const attempts = job.opts.attempts ?? 1;
-  if (job.attemptsMade >= attempts) {
-    // Terminal failure → dead-lettered (kept in BullMQ's failed set) and counted
-    // as finished so it never wedges completion.
-    log.error({ jobId: job.data.jobId, url: job.data.url, err }, "dead-lettered");
-    void finishJob(job.data.jobId);
-  }
-});
+// Launch the browser and connect Mongo AFTER the Worker is already running. The
+// handler blocks on `browserReady` until this resolves, so a job claimed during
+// startup simply waits a beat rather than racing an undefined browser.
+browser = await chromium.launch({ args: ["--no-sandbox"] });
+await connectMongo();
+markBrowserReady!();
+log.info("browser launched, mongo connected — renders can proceed");
 
 let shuttingDown = false;
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
-  log.info("shutting down — finishing in-flight URLs");
+  log.info("shutting down — finishing in-flight renders");
   metricsServer.close();
-  await worker.close(); // waits for active jobs to finish, releases locks
-  await webhookWorker.close();
-  await queue.close();
+  await worker.close();
+  await browser.close().catch(() => undefined);
+  await renderQueue.close();
   await webhookQueue.close();
   await redis.quit();
   await connection.quit();
-  await webhookConnection.quit();
   await disconnectMongo();
   process.exit(0);
 }

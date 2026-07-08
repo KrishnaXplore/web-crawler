@@ -13,6 +13,8 @@ import { createJobsRouter } from "./routes/jobs.js";
 export interface AppDeps {
   readonly redis: Redis;
   readonly queue: Queue<CrawlJobData>;
+  /** The render queue (M9) — seeds of renderMode:"browser" jobs go here instead. */
+  readonly renderQueue: Queue<CrawlJobData>;
 }
 
 /**

@@ -5,3 +5,4 @@ export * from "./enqueueUrl.js";
 export * from "./jobStore.js";
 export * from "./rateLimit.js";
 export * from "./webhooks.js";
+export * from "./completion.js";

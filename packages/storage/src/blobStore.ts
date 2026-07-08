@@ -13,8 +13,15 @@ export interface PutResult {
 export interface BlobStore {
   /** Create the bucket if it doesn't exist. Call once at startup. */
   ensureBucket(): Promise<void>;
-  /** Store bytes under a content-hash key (idempotent). */
-  putBlob(content: Buffer | string, contentType: string): Promise<PutResult>;
+  /**
+   * Store bytes under a content-hash key (idempotent). `keyPrefix` namespaces the
+   * blob type — "html" (default) or "shots" for screenshots (M9).
+   */
+  putBlob(
+    content: Buffer | string,
+    contentType: string,
+    keyPrefix?: string,
+  ): Promise<PutResult>;
   /** Fetch bytes back by key. */
   getBlob(key: string): Promise<Buffer>;
 }
@@ -36,10 +43,10 @@ export function createBlobStore(): BlobStore {
       if (!exists) await client.makeBucket(bucket);
     },
 
-    async putBlob(content, contentType) {
+    async putBlob(content, contentType, keyPrefix = "html") {
       const buf =
         typeof content === "string" ? Buffer.from(content, "utf-8") : content;
-      const key = `html/${createHash("sha256").update(buf).digest("hex")}`;
+      const key = `${keyPrefix}/${createHash("sha256").update(buf).digest("hex")}`;
 
       // Idempotent + content-dedup: identical bytes → identical key; skip re-upload.
       try {
