@@ -91,6 +91,31 @@ button.cancel {
 .exports { display: flex; gap: 14px; margin-bottom: 12px; }
 .exports a { color: var(--accent); }
 
+/* Website Health Report (M8) */
+.report { margin: 14px 0; padding: 14px; background: #10151b; border: 1px solid var(--border); border-radius: 8px; }
+.report h3 { margin: 0 0 12px; font-size: 14px; }
+.report-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.metric { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; background: var(--panel); border-radius: 6px; border-left: 3px solid var(--ok); }
+.metric.warn { border-left-color: var(--pending); }
+.metric-value { font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metric-label { color: var(--muted); font-size: 11px; }
+
+/* Clickable result rows + page drill-down modal (M8) */
+tr.clickable { cursor: pointer; }
+tr.clickable:hover td { background: rgba(91,157,255,.08); }
+
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; z-index: 10; }
+.modal { position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 22px; max-width: 720px; width: 100%; }
+.modal-close { position: absolute; top: 10px; right: 12px; width: auto; margin: 0; padding: 0 8px; font-size: 22px; line-height: 1; background: transparent; color: var(--muted); }
+.modal h3 { margin: 0 8px 4px 0; font-size: 16px; }
+.modal-url { display: inline-block; color: var(--accent); margin-bottom: 14px; word-break: break-all; }
+.detail-stats { display: flex; gap: 18px; margin-bottom: 14px; }
+.detail-analysis { display: grid; gap: 12px; }
+.analysis-block h4 { margin: 0 0 4px; font-size: 12px; color: var(--muted); text-transform: uppercase; }
+.analysis-block pre, .detail-raw pre { margin: 0; padding: 10px; background: #10151b; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; overflow-x: auto; }
+.detail-raw { margin-top: 14px; }
+.detail-raw summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); }
 th { color: var(--muted); font-weight: 500; }

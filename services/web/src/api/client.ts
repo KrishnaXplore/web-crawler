@@ -32,6 +32,22 @@ export interface PageRow {
   analysis: Record<string, unknown> | null;
 }
 
+export interface HealthReport {
+  pagesCrawled: number;
+  statusBreakdown: Record<"2xx" | "3xx" | "4xx" | "5xx" | "other", number>;
+  brokenPages: number;
+  totalDiscoveredLinks: number;
+  avgLinksPerPage: number;
+  pagesMissingH1: number;
+  pagesMissingMetaDescription: number;
+  imagesMissingAlt: number;
+  technology: string[];
+  securityScore: string | null;
+  mostLinkedPage: { url: string; inLinks: number } | null;
+  crawlDurationMs: number | null;
+  robotsRespected: boolean;
+}
+
 const BASE = "/api";
 
 async function json<T>(res: Response): Promise<T> {
@@ -64,6 +80,10 @@ export async function cancelJob(
 
 export async function getPages(id: string): Promise<{ pages: PageRow[] }> {
   return json(await fetch(`${BASE}/jobs/${id}/pages?limit=200`));
+}
+
+export async function getReport(id: string): Promise<{ report: HealthReport }> {
+  return json(await fetch(`${BASE}/jobs/${id}/report`));
 }
 
 export function exportUrl(id: string, format: "json" | "csv"): string {

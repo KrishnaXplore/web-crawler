@@ -7,6 +7,8 @@ import {
   type JobStatus,
   type PageRow,
 } from "../api/client";
+import { ReportCard } from "./ReportCard";
+import { PageDetail } from "./PageDetail";
 
 const TERMINAL = ["completed", "cancelled", "failed"];
 
@@ -14,6 +16,7 @@ export function JobView({ jobId }: { jobId: string | null }) {
   const [job, setJob] = useState<JobStatus | null>(null);
   const [pages, setPages] = useState<PageRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<PageRow | null>(null);
 
   useEffect(() => {
     if (jobId === null) return;
@@ -74,6 +77,7 @@ export function JobView({ jobId }: { jobId: string | null }) {
         <Stat label="pending" value={String(job.pending)} />
         <Stat label="depth" value={String(job.maxDepth)} />
       </div>
+      <ReportCard jobId={job.jobId} status={job.status} />
       <div className="exports">
         <a href={exportUrl(job.jobId, "json")}>export JSON</a>
         <a href={exportUrl(job.jobId, "csv")}>export CSV</a>
@@ -90,7 +94,7 @@ export function JobView({ jobId }: { jobId: string | null }) {
         </thead>
         <tbody>
           {pages.map((p) => (
-            <tr key={p.url}>
+            <tr key={p.url} className="clickable" onClick={() => setSelected(p)}>
               <td>{p.depth}</td>
               <td>{p.status ?? "-"}</td>
               <td className="title" title={p.url}>
@@ -104,6 +108,9 @@ export function JobView({ jobId }: { jobId: string | null }) {
           ))}
         </tbody>
       </table>
+      {selected && (
+        <PageDetail page={selected} onClose={() => setSelected(null)} />
+      )}
     </div>
   );
 }
