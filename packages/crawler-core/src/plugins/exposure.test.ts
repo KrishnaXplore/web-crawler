@@ -4,7 +4,12 @@ import { exposurePlugin, type ExposureResult } from "./exposure.js";
 
 function analyze(
   html: string,
-  opts: { authenticated?: boolean; patterns?: string[]; contentType?: string } = {},
+  opts: {
+    authenticated?: boolean;
+    patterns?: string[];
+    contentType?: string;
+    reveal?: boolean;
+  } = {},
 ): ExposureResult {
   return exposurePlugin.analyze({
     url: "https://portal.college.edu/results",
@@ -13,7 +18,7 @@ function analyze(
     headers: { "content-type": opts.contentType ?? "text/html" },
     status: 200,
     authenticated: opts.authenticated ?? false,
-    options: { exposure: { patterns: opts.patterns ?? [] } },
+    options: { exposure: { patterns: opts.patterns ?? [], reveal: opts.reveal } },
   }) as ExposureResult;
 }
 
@@ -36,6 +41,14 @@ describe("exposure plugin (M10)", () => {
     const s = r.findings.sensitiveData.sample!;
     expect(s).not.toContain("bob@college.edu");
     expect(s).toContain("•");
+  });
+
+  it("stores the FULL value when reveal is opted in (default stays redacted)", () => {
+    const redacted = analyze("<p>bob@college.edu</p>", { reveal: false });
+    expect(redacted.findings.sensitiveData.sample).not.toContain("bob@college.edu");
+
+    const revealed = analyze("<p>bob@college.edu</p>", { reveal: true });
+    expect(revealed.findings.sensitiveData.sample).toBe("bob@college.edu");
   });
 
   it("matches an operator-supplied roll-number pattern", () => {

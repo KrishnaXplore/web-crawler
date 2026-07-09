@@ -52,6 +52,15 @@ function redact(value: string): string {
   return `${head}${"•".repeat(6)}`;
 }
 
+/**
+ * The stored sample for a match. Default REDACTED. When the operator opts in with
+ * `reveal` (a page they've confirmed is theirs to inspect), the full value is stored,
+ * capped so a runaway match can't bloat the document.
+ */
+function sampleOf(value: string, reveal: boolean): string {
+  return reveal ? value.slice(0, 120) : redact(value);
+}
+
 function collectHrefs($: AnalyzerInput["$"]): string[] {
   return $("a[href]")
     .map((_, el) => $(el).attr("href") ?? "")
@@ -63,6 +72,7 @@ export const exposurePlugin: AnalyzerPlugin = {
   name: "exposure",
   analyze({ $, body, headers, authenticated, options }) {
     const findings: Record<string, ExposureFinding> = {};
+    const reveal = revealMatches(options);
 
     // Only scan bodies that are actually textual (skip binary/JSON-as-attachment noise
     // is out of scope — crawler only stores text bodies anyway).
@@ -91,7 +101,7 @@ export const exposurePlugin: AnalyzerPlugin = {
           // The finding: sensitive data with NO auth on the request is high risk.
           severity: authenticated ? "info" : "high",
           count: total,
-          sample: redact(first),
+          sample: sampleOf(first, reveal),
         };
       }
     }
@@ -133,4 +143,10 @@ function extractPatterns(options: AnalyzerInput["options"]): string[] {
   return Array.isArray(exposure.patterns)
     ? exposure.patterns.filter((p): p is string => typeof p === "string")
     : [];
+}
+
+/** Operator opt-in to store full (unredacted) matched values. Default false. */
+function revealMatches(options: AnalyzerInput["options"]): boolean {
+  const exposure = (options?.exposure ?? {}) as { reveal?: unknown };
+  return exposure.reveal === true;
 }

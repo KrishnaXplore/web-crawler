@@ -22,6 +22,7 @@ export async function createJob(input: JobRecordInput): Promise<void> {
     renderMode: input.renderMode ?? "http",
     requestHeaders: input.requestHeaders ?? null,
     exposurePatterns: input.exposurePatterns ?? [],
+    exposureReveal: input.exposureReveal ?? false,
   });
 }
 
@@ -106,6 +107,7 @@ export async function getJobConfig(jobId: string): Promise<JobConfig | null> {
     requestHeaders:
       (doc.requestHeaders as Record<string, string> | null | undefined) ?? null,
     exposurePatterns: doc.exposurePatterns ?? [],
+    exposureReveal: doc.exposureReveal ?? false,
   };
 }
 

@@ -56,6 +56,11 @@ export interface JobConfig {
    * roll-number format. Source strings; compiled per page.
    */
   readonly exposurePatterns?: readonly string[];
+  /**
+   * Exposure (M10): store FULL matched values instead of redacted samples. Opt-in,
+   * for pages the operator has confirmed are theirs to inspect. Default false.
+   */
+  readonly exposureReveal?: boolean;
 }
 
 /**

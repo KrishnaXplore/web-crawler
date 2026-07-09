@@ -23,6 +23,7 @@ const jobSchema = new Schema(
     // by the public API) + custom sensitive-data patterns for the exposure plugin.
     requestHeaders: { type: Schema.Types.Mixed, default: null },
     exposurePatterns: { type: [String], default: [] },
+    exposureReveal: { type: Boolean, default: false },
     status: {
       type: String,
       // cancelling → cancelled is the two-phase cancel (M6): between the API call

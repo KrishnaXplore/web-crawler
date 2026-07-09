@@ -172,7 +172,12 @@ const worker = new Worker<CrawlJobData>(
               headers: result.headers,
               status: result.status ?? 0,
               authenticated: cfg.requestHeaders != null,
-              options: { exposure: { patterns: cfg.exposurePatterns ?? [] } },
+              options: {
+                exposure: {
+                  patterns: cfg.exposurePatterns ?? [],
+                  reveal: cfg.exposureReveal ?? false,
+                },
+              },
             })
           : null;
 

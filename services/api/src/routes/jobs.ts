@@ -37,6 +37,8 @@ const createJobSchema = z.object({
   // authenticated baseline pass; exposurePatterns are custom sensitive-data regexes.
   requestHeaders: z.record(z.string(), z.string()).optional(),
   exposurePatterns: z.array(z.string()).max(50).default([]),
+  // Opt-in: store full matched values instead of redacted samples (M10).
+  exposureReveal: z.boolean().default(false),
 });
 
 export function createJobsRouter(deps: AppDeps): express.Router {
@@ -62,6 +64,7 @@ export function createJobsRouter(deps: AppDeps): express.Router {
           renderMode: body.renderMode,
           requestHeaders: body.requestHeaders ?? null,
           exposurePatterns: body.exposurePatterns,
+          exposureReveal: body.exposureReveal,
         };
         const jobId = randomUUID();
         await createJob({ jobId, seedUrl: seed, ...config });
