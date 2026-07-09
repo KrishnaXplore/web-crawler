@@ -24,6 +24,13 @@ header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; }
 header h1 { font-size: 22px; margin: 0; }
 .subtitle { color: var(--muted); }
 
+.nav { margin-left: auto; display: flex; gap: 8px; }
+.navbtn {
+  width: auto; margin: 0; padding: 7px 14px; font-weight: 500; font-size: 13px;
+  background: var(--panel); color: var(--muted); border: 1px solid var(--border);
+}
+.navbtn.active { background: var(--accent); color: #06101f; border-color: var(--accent); }
+
 main { display: grid; grid-template-columns: 320px 1fr; gap: 20px; align-items: start; }
 
 .panel {
@@ -35,7 +42,7 @@ main { display: grid; grid-template-columns: 320px 1fr; gap: 20px; align-items: 
 .panel h2 { margin: 0 0 14px; font-size: 16px; }
 
 form label { display: block; margin-bottom: 10px; color: var(--muted); font-size: 12px; }
-form input[type="text"], form input:not([type]), form input[type="number"] {
+form input[type="text"], form input:not([type]), form input[type="number"], form textarea {
   width: 100%;
   margin-top: 4px;
   padding: 8px;
@@ -43,7 +50,9 @@ form input[type="text"], form input:not([type]), form input[type="number"] {
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text);
+  font-family: inherit;
 }
+form textarea { resize: vertical; font-size: 12px; }
 .row { display: flex; gap: 10px; }
 .row label { flex: 1; }
 label.check { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 13px; }

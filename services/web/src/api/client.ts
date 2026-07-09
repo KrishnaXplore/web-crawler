@@ -9,6 +9,10 @@ export interface CreateJobInput {
   storeHtml: boolean;
   plugins: string[];
   webhookUrl?: string;
+  // Exposure audit (M10)
+  exposurePatterns?: string[];
+  requestHeaders?: Record<string, string>;
+  exposureReveal?: boolean;
 }
 
 export interface JobStatus {
