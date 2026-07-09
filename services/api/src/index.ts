@@ -1,5 +1,6 @@
 import { loadEnv } from "@crawler/config";
 import { createLogger } from "@crawler/logger";
+import { domainsRouter } from "./routes/domains.js";
 import { createRedis, createCrawlQueue, createRenderQueue } from "@crawler/queue";
 import { connectMongo, disconnectMongo } from "@crawler/db";
 import { createApp } from "./app.js";
@@ -12,6 +13,7 @@ const renderQueue = createRenderQueue(redis);
 await connectMongo();
 
 const app = createApp({ redis, queue, renderQueue });
+
 const server = app.listen(env.API_PORT, () => {
   log.info({ port: env.API_PORT }, "api listening");
 });

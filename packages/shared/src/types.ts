@@ -5,7 +5,7 @@
 
 export type JobStatus = "pending" | "running" | "completed" | "failed";
 
-export type RenderMode = "http" | "headless";
+export type RenderMode = "http" | "browser" | "auto";
 
 export interface CrawlScope {
   /** Maximum link depth from the seed (seed = depth 0). */
@@ -23,6 +23,8 @@ export interface CrawlJobConfig {
   readonly respectRobots: boolean;
   /** Names of analyzer plugins to run against each page (see plugins/). */
   readonly plugins: readonly string[];
+  /** Natural language instruction for what data to extract (M13). */
+  readonly intent?: string;
 }
 
 /**
@@ -44,7 +46,7 @@ export interface JobConfig {
    * How pages are fetched (M9): "http" = plain fetch (default); "browser" = the
    * renderer service executes the page in headless Chromium (JS SPAs, screenshots).
    */
-  readonly renderMode?: "http" | "browser";
+  readonly renderMode?: RenderMode;
   /**
    * Exposure audit context (M10). Extra request headers (e.g. a session Cookie) for
    * the *authenticated baseline* pass. A secret: read by workers, but never returned
@@ -58,9 +60,11 @@ export interface JobConfig {
   readonly exposurePatterns?: readonly string[];
   /**
    * Exposure (M10): store FULL matched values instead of redacted samples. Opt-in,
-   * for pages the operator has confirmed are theirs to inspect. Default false.
+   * meant only for authorized audits on owned properties.
    */
   readonly exposureReveal?: boolean;
+  /** Natural language instruction for what data to extract (M13). */
+  readonly intent?: string;
 }
 
 /**

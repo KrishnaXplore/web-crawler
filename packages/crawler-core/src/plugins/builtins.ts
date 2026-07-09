@@ -1,6 +1,8 @@
 import type { AnalyzerPlugin } from "./types.js";
 import { exposurePlugin } from "./exposure.js";
 import { structuredPlugin } from "./structured.js";
+import { rulesPlugin } from "./rules.js";
+import { discoveryPlugin } from "./discovery.js";
 
 /** SEO signals from the DOM. */
 export const seoPlugin: AnalyzerPlugin = {
@@ -150,4 +152,6 @@ export const BUILTIN_PLUGINS: readonly AnalyzerPlugin[] = [
   metadataPlugin,
   exposurePlugin,
   structuredPlugin,
+  rulesPlugin,
+  discoveryPlugin,
 ];

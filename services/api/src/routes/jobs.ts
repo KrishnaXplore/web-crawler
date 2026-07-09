@@ -11,6 +11,7 @@ import {
   iteratePages,
   buildReport,
   markJobCancelling,
+  getDomainProfile,
 } from "@crawler/db";
 import { validateBody } from "../middleware/validate.js";
 import { ssrfPrescreen } from "../middleware/ssrfPrescreen.js";
@@ -32,13 +33,14 @@ const createJobSchema = z.object({
     .url()
     .refine((u) => /^https?:\/\//i.test(u), "must be http(s)")
     .optional(),
-  renderMode: z.enum(["http", "browser"]).default("http"),
+  renderMode: z.enum(["http", "browser", "auto"]).default("auto"),
   // Exposure audit (M10). requestHeaders is a secret (session/token) for the
   // authenticated baseline pass; exposurePatterns are custom sensitive-data regexes.
   requestHeaders: z.record(z.string(), z.string()).optional(),
   exposurePatterns: z.array(z.string()).max(50).default([]),
   // Opt-in: store full matched values instead of redacted samples (M10).
   exposureReveal: z.boolean().default(false),
+  intent: z.string().optional(),
 });
 
 export function createJobsRouter(deps: AppDeps): express.Router {
@@ -53,6 +55,12 @@ export function createJobsRouter(deps: AppDeps): express.Router {
       try {
         const body = req.body as z.infer<typeof createJobSchema>;
         const seed = normalizeUrl(body.seedUrl);
+        let finalRenderMode = body.renderMode;
+        if (finalRenderMode === "auto") {
+          const profile = await getDomainProfile(new URL(seed).hostname);
+          finalRenderMode = profile?.needsRender ? "browser" : "http";
+        }
+
         const config: JobConfig = {
           maxDepth: body.maxDepth,
           maxPages: body.maxPages,
@@ -61,17 +69,18 @@ export function createJobsRouter(deps: AppDeps): express.Router {
           storeHtml: body.storeHtml,
           plugins: body.plugins,
           webhookUrl: body.webhookUrl ?? null,
-          renderMode: body.renderMode,
+          renderMode: finalRenderMode as "http" | "browser",
           requestHeaders: body.requestHeaders ?? null,
           exposurePatterns: body.exposurePatterns,
           exposureReveal: body.exposureReveal,
+          intent: body.intent,
         };
         const jobId = randomUUID();
         await createJob({ jobId, seedUrl: seed, ...config });
         // Route the seed to the render queue for browser-mode jobs (M9); the renderer
         // then spreads children onto its own queue. Same enqueueUrl dedup primitive.
         const targetQueue =
-          body.renderMode === "browser" ? deps.renderQueue : deps.queue;
+          finalRenderMode === "browser" ? deps.renderQueue : deps.queue;
         await enqueueUrl(
           targetQueue,
           deps.redis,

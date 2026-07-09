@@ -16,12 +16,20 @@ vi.mock("@crawler/db", () => ({
   searchPages: vi.fn(),
   buildReport: vi.fn(),
   markJobCancelling: vi.fn(),
+  getDomainProfile: vi.fn(),
 }));
 
 // Validation + health paths don't touch Redis/Mongo; cancel needs only redis.set
 // (the tombstone), so a stub suffices.
 const redisSet = vi.fn();
-const deps = { redis: { set: redisSet } } as unknown as AppDeps;
+const redisSadd = vi.fn().mockResolvedValue(1);
+const redisScard = vi.fn().mockResolvedValue(1);
+const redisIncr = vi.fn().mockResolvedValue(1);
+const deps = { 
+  redis: { set: redisSet, sadd: redisSadd, scard: redisScard, incr: redisIncr },
+  queue: { add: vi.fn().mockResolvedValue("job1") },
+  renderQueue: { add: vi.fn().mockResolvedValue("job2") }
+} as unknown as AppDeps;
 const app = createApp(deps);
 
 const job = (status: string) => ({
@@ -81,6 +89,41 @@ describe("api", () => {
       .post("/jobs")
       .send({ seedUrl: "https://example.com/", webhookUrl: "http://127.0.0.1/hook" });
     expect(r.status).toBe(400);
+  });
+
+  it("POST /jobs resolves 'auto' renderMode to 'browser' if domain needsRender", async () => {
+    const { getDomainProfile, createJob } = await import("@crawler/db");
+    vi.mocked(getDomainProfile).mockResolvedValue({
+      domain: "example.com",
+      needsRender: true,
+      renderModesSeen: ["browser"],
+      lastCrawled: new Date(),
+    });
+    vi.mocked(createJob).mockResolvedValue("job123");
+
+    const r = await request(app)
+      .post("/jobs")
+      .send({ seedUrl: "https://example.com/", renderMode: "auto" });
+
+    expect(r.status).toBe(202);
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({ renderMode: "browser" })
+    );
+  });
+
+  it("POST /jobs resolves 'auto' renderMode to 'http' if domain does not needRender", async () => {
+    const { getDomainProfile, createJob } = await import("@crawler/db");
+    vi.mocked(getDomainProfile).mockResolvedValue(null);
+    vi.mocked(createJob).mockResolvedValue("job124");
+
+    const r = await request(app)
+      .post("/jobs")
+      .send({ seedUrl: "https://example.com/", renderMode: "auto" });
+
+    expect(r.status).toBe(202);
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({ renderMode: "http" })
+    );
   });
 });
 

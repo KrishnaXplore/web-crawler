@@ -32,6 +32,8 @@ import {
   countPages,
   markJobFinished,
   recordDomainObservation,
+  getRulesForDomain,
+  upsertRule,
 } from "@crawler/db";
 import { createBlobStore } from "@crawler/storage";
 import { type JobConfig } from "@crawler/shared";
@@ -165,9 +167,15 @@ const worker = new Worker<CrawlJobData>(
       }
 
       // Analyzer plugins (M5 Step C): run the enabled ones over the page.
+      let rules = null;
+      if (cfg.plugins.includes("rules")) {
+        const hostname = new URL(result.url).hostname;
+        rules = await getRulesForDomain(hostname);
+      }
+
       const analysis =
         result.html !== null
-          ? runPlugins(cfg.plugins, {
+          ? await runPlugins(cfg.plugins, {
               url: result.url,
               html: result.html,
               headers: result.headers,
@@ -178,9 +186,18 @@ const worker = new Worker<CrawlJobData>(
                   patterns: cfg.exposurePatterns ?? [],
                   reveal: cfg.exposureReveal ?? false,
                 },
+                rules: rules ?? undefined,
               },
             })
           : null;
+
+      // M13/M14 Intent Layer (Self Healing): 
+      // If the rules plugin generated new rules (because none existed, or they failed),
+      // we save them back to the domain profile's Rule Library.
+      if (analysis?.rules && (analysis.rules as any).generatedRules) {
+        await upsertRule((analysis.rules as any).generatedRules);
+        log.info({ url: result.url }, "Persisted LLM-generated extraction rules");
+      }
 
       await upsertPage({
         jobId: data.jobId,

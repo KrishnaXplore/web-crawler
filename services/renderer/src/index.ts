@@ -32,6 +32,8 @@ import {
   countPages,
   markJobFinished,
   recordDomainObservation,
+  getRulesForDomain,
+  upsertRule,
 } from "@crawler/db";
 import { createBlobStore } from "@crawler/storage";
 import { type JobConfig } from "@crawler/shared";
@@ -158,12 +160,16 @@ const worker = new Worker<CrawlJobData>(
         htmlBytes = put.bytes;
       }
 
-
-
       // cheerio plugins over the rendered DOM.
+      let rules = null;
+      if (cfg.plugins.includes("rules")) {
+        const hostname = new URL(result.url).hostname;
+        rules = await getRulesForDomain(hostname);
+      }
+
       const analysis =
         result.html !== null
-          ? runPlugins(cfg.plugins, {
+          ? await runPlugins(cfg.plugins, {
               url: result.url,
               html: result.html,
               headers: result.headers,
@@ -174,9 +180,16 @@ const worker = new Worker<CrawlJobData>(
                   patterns: cfg.exposurePatterns ?? [],
                   reveal: cfg.exposureReveal ?? false,
                 },
+                rules: rules ?? undefined,
               },
+              intent: cfg.intent,
             })
           : null;
+
+      if (analysis?.rules && (analysis.rules as any).generatedRules) {
+        await upsertRule((analysis.rules as any).generatedRules);
+        log.info({ url: result.url }, "Persisted LLM-generated extraction rules");
+      }
 
       await upsertPage({
         jobId: data.jobId,

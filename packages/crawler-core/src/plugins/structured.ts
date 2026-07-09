@@ -11,8 +11,12 @@ import type { CheerioAPI } from "cheerio";
 export interface StructuredRecord {
   /** Detected schema type (e.g. "Article", "Product"), "og:<type>", or null. */
   readonly type: string | null;
-  /** Which tier produced the record. */
-  readonly source: "json-ld" | "microdata" | "opengraph" | "none";
+  /** 
+   * Which tier produced the record.
+   * "rules": Heuristic extraction based on DOM structure.
+   * "none": Extraction failed or no data found.
+   */
+  readonly source: "json-ld" | "microdata" | "opengraph" | "rules" | "none";
   readonly fields: Record<string, string>;
   readonly confidence: "high" | "low" | "none";
 }

@@ -1,147 +1,77 @@
-# Web Intelligence Platform
+# Website Intelligence Platform
 
-A **distributed web crawler and page-analysis platform**: submit a seed URL and a
-scope, and a horizontally-scalable fleet of workers crawls the site politely, runs
-pluggable analyzers over every page (SEO, security headers, tech fingerprint, page
-metadata), stores results and raw HTML, and streams them back — with live progress,
-search, export, webhooks, and Prometheus metrics throughout.
+A high-scale, headless-capable web crawler and extraction engine. Built for massive concurrency, polite crawling, and autonomous self-healing data extraction.
 
-Built as a TypeScript **pnpm monorepo**: three deployable services around a core of
-shared packages, backed by Redis (BullMQ), MongoDB, and MinIO.
+## Architecture Sketch
 
-```
- Browser (React+Vite) ──► api (Express) ──► MongoDB (jobs · pages)
-                              │      └────► Redis + BullMQ (queue · dedup · counters)
-                              ▼                     ▲│
-                        202 Accepted                ││ claim / enqueue children
-                                                    │▼
-                                          worker ×N (stateless)
-                              robots → rate-limit → SSRF guard → fetch
-                                   → parse → analyze (plugins) → extract links
-                                                    │
-                                        MinIO (raw HTML blobs)   Prometheus /metrics
-```
+The platform is split into independent services communicating via Redis and MongoDB.
 
-## Highlights
+- **API (`services/api`)**: The control plane. Submits crawl jobs, returns paginated results, handles webhooks.
+- **Worker (`services/worker`)**: The raw HTTP engine. Pulls URLs from BullMQ, fetches HTML rapidly via Undici, runs analyzers, extracts data, and saves to MongoDB/MinIO.
+- **Renderer (`services/renderer`)**: The headless browser engine (Playwright). Only runs when Javascript execution is required (SPA support, screenshots).
+- **Web (`services/web`)**: The React-based operational dashboard. Submit jobs and view structured extraction results in real-time.
 
-- **Scales horizontally** — workers are stateless ([ADR-0003](docs/adr/0003-stateless-workers.md));
-  all coordination lives in Redis (queue, dedup set, atomic counters) and MongoDB.
-  Add replicas, get throughput.
-- **Knows when it's done** — distributed termination via a reference-counted
-  `pending` counter with an enqueue-before-decrement invariant; no polling, no
-  heuristics ([docs/phase4.md](docs/phase4.md)).
-- **Crawls politely** — robots.txt respected (incl. crawl-delay), per-domain rate
-  limiting shared across all workers via a Redis Lua gate, honest User-Agent.
-- **SSRF-hardened** — a crawler is an SSRF weapon by construction, so the guard sits
-  at *fetch time*: DNS-validating, IP-pinning undici agent that re-checks every
-  redirect hop; submission-time checks are only UX
-  ([ADR-0005](docs/adr/0005-ssrf-defense.md)). Webhook delivery goes through the
-  **same guard** — one egress path, one set of rules.
-- **No work silently lost** — retries with exponential backoff, dead-letter queue for
-  post-mortems, graceful drain on SIGTERM, idempotent page upserts with a unique-index
-  backstop ([ADR-0001](docs/adr/0001-mongodb-for-pages.md)).
-- **Extensible by plugin** — analyzers are pure functions behind one interface
-  ([ADR-0006](docs/adr/0006-modular-monolith-of-services.md)); a plugin that throws
-  fails its own slot, never the crawl. Built-ins: `seo`, `tech`, `security`, `metadata`.
-- **Observable** — shared Prometheus registry (`/metrics` on api and worker),
-  outcome-labelled counters, fetch-duration histograms.
+## The Extraction Engine
 
-## Features
-
-| | |
-|---|---|
-| Submit & scope | depth, page cap, same-host, robots on/off, store raw HTML, analyzer selection |
-| Live dashboard | React SPA: submit, watch pending/persisted tick, browse results + analysis, cancel |
-| Cancel | `POST /jobs/:id/cancel` — tombstone + no-op drain; partial results kept |
-| Webhooks | HMAC-signed (`X-Crawler-Signature`) callback on `job.completed` / `job.cancelled`, delivered via its own BullMQ queue (retries → DLQ) |
-| Search | Mongo text index over title + description, `GET /search?q=…` |
-| Export | `GET /jobs/:id/export?format=json\|csv` — streamed, bounded memory |
-| Blob storage | raw HTML in MinIO under content-hash keys; Mongo stores only the key |
+Unlike typical scrapers, this platform uses a multi-tier extraction strategy:
+1. **Tier 1 (Structured)**: Extracts embedded JSON-LD, Microdata, and OpenGraph silently.
+2. **Tier 2 (Rule Library)**: Executes configured CSS/XPath rules for a domain.
+3. **Tier 3 (Discovery)**: Dynamically skips pagination and lists to save cost.
+4. **Tier 4 (Intent Layer)**: If rules fail or don't exist, the crawler uses an LLM to generate them on the fly based on a natural language intent, and saves them back to the database.
 
 ## Quickstart
 
-Prereqs: Node ≥ 20, pnpm, Docker.
-
+### 1. Start Infrastructure
+Start the required databases (MongoDB, Redis, MinIO) via Docker Compose:
 ```bash
-cp .env.example .env          # defaults match the compose file
+docker compose up -d
+```
+
+### 2. Install Dependencies
+This is a `pnpm` workspace. Install and build the monorepo:
+```bash
 pnpm install
-pnpm infra:up                 # Redis :6380 · MongoDB :27018 · MinIO :9002 (non-standard ports)
-
-pnpm api                      # REST API on :3000
-pnpm worker                   # crawl worker (+ metrics on :9464) — run as many as you like
-pnpm --filter @crawler/web dev  # dashboard on :5173 (proxies /api → :3000)
+pnpm build
 ```
 
-Submit a crawl:
+### 3. Start the Platform
+You need to run the API, Worker(s), and the Dashboard. Open separate terminals:
 
 ```bash
-curl -X POST localhost:3000/jobs -H 'content-type: application/json' -d '{
-  "seedUrl": "https://quotes.toscrape.com/",
-  "maxDepth": 1,
-  "maxPages": 25,
-  "plugins": ["seo", "tech", "security", "metadata"],
-  "storeHtml": true
-}'
-# → 202 {"jobId": "…"}
+# Terminal 1: API
+cd services/api
+pnpm dev
 
-curl localhost:3000/jobs/<id>          # status + live counts
-curl localhost:3000/jobs/<id>/pages    # results with per-page analysis
-curl -X POST localhost:3000/jobs/<id>/cancel
-curl "localhost:3000/jobs/<id>/export?format=csv"
-curl "localhost:3000/search?q=quotes"
+# Terminal 2: Worker (HTTP engine)
+cd services/worker
+pnpm dev
+
+# Terminal 3: Renderer (Headless browser - optional but recommended)
+cd services/renderer
+pnpm dev
+
+# Terminal 4: Web Dashboard
+cd services/web
+pnpm dev
 ```
 
-Optional env: `API_KEY` (enables `X-API-Key` auth), `WEBHOOK_SECRET` (signs webhook
-deliveries).
-
-## Testing
+### 4. Submit a Crawl
+Visit `http://localhost:5173` to view the dashboard, or use curl:
 
 ```bash
-pnpm -r test        # offline suite — no infra needed (60+ tests)
-pnpm -r typecheck
+curl -X POST http://localhost:3000/jobs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "seedUrl": "https://quotes.toscrape.com",
+    "maxDepth": 2,
+    "maxPages": 10,
+    "intent": "extract the quote text and author"
+  }'
 ```
 
-Integration suites are opt-in so the default run works anywhere:
-`RUN_REDIS_IT=1` / `RUN_MONGO_IT=1` / `RUN_MINIO_IT=1` (require `pnpm infra:up`).
+## Documentation
 
-## Repository layout
-
-```
-packages/
-  shared/         pure domain types, URL normalization + hashing (browser-safe)
-  config/         env contract — zod-validated once at boot, fail-fast
-  crawler-core/   the crawl pipeline (robots, SSRF guard, fetch, parse, extract),
-                  plugin host + built-in analyzers, webhook delivery
-  queue/          BullMQ queues, dedup-guarded enqueue, job counters, rate limiter
-  db/             Mongoose models (Job, Page), idempotent repository
-  storage/        MinIO blob store (content-hash keys)
-  metrics/        shared Prometheus registry — metric names defined once
-services/
-  api/            Express REST edge: validation, SSRF pre-screen, jobs/search/export
-  worker/         stateless queue consumer wiring crawler-core to the stores
-  web/            React + Vite dashboard
-scripts/          CLI entry points (crawl, seed, results, html, dlq)
-docs/             HLD · LLD · 8-phase workflow · ADRs 0001–0006 · per-milestone
-                  phase docs · production target (architecture-v2 + gap-analysis)
-```
-
-## Design docs
-
-The design is written down *before* the code, milestone by milestone:
-
-- [architecture.md](docs/architecture.md) — system HLD and the scaling model
-- [workflow.md](docs/workflow.md) — the 8-phase crawl lifecycle incl. failure paths
-- [project-structure.md](docs/project-structure.md) — LLD, package boundaries
-- [ADRs](docs/adr/) — MongoDB, BullMQ-over-Kafka, stateless workers, frontier
-  scheduling, SSRF defense, modular-monolith service split
-- [phase1–6](docs/) — what/why/alternatives for every milestone as built
-- [architecture-v2.md](docs/architecture-v2.md) + [gap-analysis.md](docs/gap-analysis.md)
-  — the production/enterprise target and the prioritized path to it
-
-## Status
-
-M1–M6 complete: crawl core → queue + workers → persistence + blobs → hardening
-(completion detection, retries/DLQ, SSRF, rate limiting) → product surface (API,
-dashboard, plugins, metrics, search, export) → cancel + webhooks + metadata plugin.
-Every feature above is exercised end-to-end; the roadmap beyond lives in
-[gap-analysis.md](docs/gap-analysis.md).
+- `docs/architecture.md`: Original HLD and structural decisions.
+- `docs/architecture-v3.md`: The complete roadmap and multi-tier extraction design.
+- `docs/api-spec.yaml`: OpenAPI specification for the REST API.
+- `docs/runbook.md`: Operations and troubleshooting guide.

@@ -13,6 +13,8 @@ export interface CreateJobInput {
   exposurePatterns?: string[];
   requestHeaders?: Record<string, string>;
   exposureReveal?: boolean;
+  renderMode?: "http" | "browser" | "auto";
+  intent?: string;
 }
 
 export interface JobStatus {
@@ -110,4 +112,6 @@ export const AVAILABLE_PLUGINS = [
   "metadata",
   "exposure",
   "structured",
+  "rules",
+  "discovery",
 ] as const;

@@ -10,6 +10,8 @@ export function JobForm({ onCreated }: { onCreated: (id: string) => void }) {
   const [storeHtml, setStoreHtml] = useState(false);
   const [plugins, setPlugins] = useState<string[]>(["seo", "tech", "security"]);
   const [webhookUrl, setWebhookUrl] = useState("");
+  const [renderMode, setRenderMode] = useState<"auto" | "http" | "browser">("auto");
+  const [intent, setIntent] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -33,6 +35,8 @@ export function JobForm({ onCreated }: { onCreated: (id: string) => void }) {
         storeHtml,
         plugins,
         webhookUrl: webhookUrl.trim() || undefined,
+        renderMode,
+        intent: intent.trim() || undefined,
       });
       onCreated(jobId);
     } catch (err) {
@@ -101,6 +105,22 @@ export function JobForm({ onCreated }: { onCreated: (id: string) => void }) {
           value={webhookUrl}
           onChange={(e) => setWebhookUrl(e.target.value)}
           placeholder="https://example.com/hook"
+        />
+      </label>
+      <label>
+        Render Mode
+        <select value={renderMode} onChange={(e) => setRenderMode(e.target.value as any)}>
+          <option value="auto">Auto (Intelligence Layer)</option>
+          <option value="http">HTTP (Fast)</option>
+          <option value="browser">Browser (JS/SPA)</option>
+        </select>
+      </label>
+      <label>
+        Intent (M13 - natural language extraction target)
+        <input
+          value={intent}
+          onChange={(e) => setIntent(e.target.value)}
+          placeholder="e.g., extract the product price and name"
         />
       </label>
       <fieldset>
