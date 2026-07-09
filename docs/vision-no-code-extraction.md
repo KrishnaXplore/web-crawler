@@ -155,6 +155,36 @@ Open ≠ do-anything. A credible open-data harvester:
 
 This is a feature and a differentiator, not a constraint.
 
+## 8b. Coverage experiment — findings (2026-07-09, real data)
+
+Ran the §9 experiment: fetched 10 real public sites (raw HTML) + re-rendered 3 JS-heavy
+ones in headless Chromium, checking JSON-LD / microdata / OpenGraph presence.
+
+**Raw-HTML structured-data coverage: ~40%** (4/10 had JSON-LD or microdata):
+- ✅ bbc.com/news (JSON-LD WebPage), python.org (WebSite), wikipedia (Article),
+  quotes.toscrape (microdata ×10).
+- ❌ theguardian, MDN, books.toscrape, data.gov, eventbrite (raw HTML had none);
+  allrecipes returned **402** (blocked).
+- **OpenGraph is more common** than JSON-LD (bbc, python, data.gov, eventbrite) → a
+  reliable low tier.
+
+**Rendering did NOT rescue the ❌ sites** — Guardian/Eventbrite still showed 0 JSON-LD
+after JS ran. Two honest reasons, both design-relevant:
+1. **Structured data lives on DETAIL pages, not landing pages.** I probed homepages;
+   JSON-LD concentrates on the specific article/event/product page. → **Discovery
+   (reaching detail pages) matters as much as extraction.**
+2. **Anti-bot / consent walls** serve a stripped page to bots (allrecipes 402, likely
+   Guardian/Eventbrite). → **anti-bot is a real coverage ceiling; scope it honestly.**
+
+**Design conclusions (corrected):**
+- JSON-LD + microdata + OG is a worthwhile *cheap first tier* but covers **~40%, not the
+  majority** → a **CSS/XPath tier is required**, not optional; and the long tail is where
+  an AI rule-generator would (eventually) earn its place. The hybrid design is now
+  justified by data, not assumption.
+- **Reach detail pages** (M12 discovery) is as important as the extractor itself.
+- Run extraction on the **rendered DOM** for JS sites, but don't expect rendering alone to
+  fix coverage.
+
 ## 9. Research-stage checklist (do this before speccing M11)
 
 1. **Prior-art survey** — use 3–4 tools (Browse AI, Octoparse, Firecrawl, ParseHub);

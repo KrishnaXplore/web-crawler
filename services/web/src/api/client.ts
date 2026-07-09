@@ -109,4 +109,5 @@ export const AVAILABLE_PLUGINS = [
   "security",
   "metadata",
   "exposure",
+  "structured",
 ] as const;
