@@ -135,15 +135,18 @@ ships value and nothing later blocks earlier.
 
 | Phase | Theme | Contents (rule-based first; AI optional/off) |
 |---|---|---|
-| **M11 — Extraction engine** | the shared core | JSON-LD → Schema.org/microdata → OpenGraph → CSS/XPath tiers as an extractor plugin; typed records; confidence score; dataset export with provenance (source URL, license, fetch date) |
-| **M12 — Discovery** | "which page" | sitemap ingestion; page-type classification (listing vs detail); type-targeted extraction (specify a schema/field set, not URLs) |
-| **M13 — Intent layer** | accessibility | point-and-click example selection → rule inference; natural-language intent → rule generation (heuristics; **optional** AI socket for rule generation, never per-page) |
-| **M14 — Trust** | the research core | verification/confidence surfaced to the user; self-healing (detect broken rules, regenerate); "review low-confidence" queue |
-| **M15 — Operate** | for real users | scheduled re-runs, change alerts, export to Sheets/API/webhook (webhooks already exist) |
+| **M11 — Extraction engine** | the shared core | Step 1 ✅ structured tier (JSON-LD→microdata→OG); Step 2 ⬜ CSS/XPath tier drawing rules from the Rule Library; typed records; confidence; provenance export |
+| **M12 — Website Intelligence Layer** | **per-domain memory (the differentiator)** | `@crawler/intelligence` + Mongo `domainProfiles` (global facts: tech, render-requirement, page-type map, content fingerprint) + `rules` (per-org Rule Library: versioned, hit-rate-scored). Consulted at crawl edges (READ before / WRITE after). **Underlies rule reuse (M11 Step 2), self-heal (M15), and analysis change-over-time.** See architecture-v3 §2.45 |
+| **M13 — Discovery** | "which page" | sitemap ingestion; page-type classification (listing vs detail); type-targeted extraction (specify a schema/field set, not URLs). Uses the domain profile's page-type map |
+| **M14 — Intent layer** | accessibility | point-and-click example → rule inference; natural-language intent → rule generation (heuristics; **optional** AI socket, never per-page); generated rules saved to the Rule Library |
+| **M15 — Trust / self-heal** | the research core | verification/confidence surfaced; **falling rule hit-rate (from the Intelligence Layer) triggers self-heal**; "review low-confidence" queue |
+| **M16 — Operate** | for real users | scheduled re-runs, change alerts (diff vs stored fingerprint), export to Sheets/API/webhook (webhooks already exist) |
 
-M11 is the natural next build: it's rule-based, needs no AI, reuses the plugin +
-export surfaces, and everything above sits on it. The exposure analyzer (M10) becomes
-**just another consumer** of the same extraction engine.
+**Sequencing note:** M11 Step 2's rule reuse and M15's self-heal both depend on the
+**Intelligence Layer (M12)** — so the natural order is M11 Step 1 (done) → a thin
+**M12** slice (domainProfiles + Rule Library skeleton + render-requirement memory) →
+M11 Step 2 (CSS/XPath reading from it) → M13+. The exposure analyzer (M10) and the
+analysis branch both also become consumers of the Intelligence Layer (change-over-time).
 
 ## 8. Ethics & licensing (different from the security side, still real)
 
