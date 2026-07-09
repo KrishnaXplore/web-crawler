@@ -31,6 +31,7 @@ import {
   upsertPage,
   countPages,
   markJobFinished,
+  recordDomainObservation,
 } from "@crawler/db";
 import { createBlobStore } from "@crawler/storage";
 import { type JobConfig } from "@crawler/shared";
@@ -199,6 +200,16 @@ const worker = new Worker<CrawlJobData>(
         htmlBytes,
         analysis,
       });
+
+      // Website Intelligence Layer (M12): remember this domain. Best-effort — a
+      // profile-write failure must never fail the crawl.
+      const tech =
+        (analysis?.tech as { detected?: string[] } | undefined)?.detected ?? [];
+      void recordDomainObservation(hostname, {
+        tech,
+        renderMode: "http",
+        statusOk: (result.status ?? 0) >= 200 && (result.status ?? 0) < 400,
+      }).catch(() => undefined);
     }
 
     log.info(

@@ -8,6 +8,7 @@ import { metricsMiddleware } from "./middleware/metrics.js";
 import { healthRouter } from "./routes/health.js";
 import { metricsRouter } from "./routes/metrics.js";
 import { searchRouter } from "./routes/search.js";
+import { domainsRouter } from "./routes/domains.js";
 import { createJobsRouter } from "./routes/jobs.js";
 
 export interface AppDeps {
@@ -31,6 +32,7 @@ export function createApp(deps: AppDeps): express.Express {
   app.use("/metrics", metricsRouter);
   app.use("/jobs", apiKeyAuth, createJobsRouter(deps));
   app.use("/search", apiKeyAuth, searchRouter);
+  app.use("/domains", apiKeyAuth, domainsRouter);
 
   app.use(errorHandler);
   return app;

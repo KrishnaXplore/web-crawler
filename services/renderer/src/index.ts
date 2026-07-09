@@ -31,6 +31,7 @@ import {
   upsertPage,
   countPages,
   markJobFinished,
+  recordDomainObservation,
 } from "@crawler/db";
 import { createBlobStore } from "@crawler/storage";
 import { type JobConfig } from "@crawler/shared";
@@ -195,6 +196,16 @@ const worker = new Worker<CrawlJobData>(
         htmlBytes,
         analysis,
       });
+
+      // Website Intelligence Layer (M12): record browser-render observation. This is
+      // what makes `needsRender` true for the domain. Best-effort.
+      const tech =
+        (analysis?.tech as { detected?: string[] } | undefined)?.detected ?? [];
+      void recordDomainObservation(hostname, {
+        tech,
+        renderMode: "browser",
+        statusOk: (result.status ?? 0) >= 200 && (result.status ?? 0) < 400,
+      }).catch(() => undefined);
     }
 
     log.info(
