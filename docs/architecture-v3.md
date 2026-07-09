@@ -123,6 +123,42 @@ generate a rule for a site-template, which is **cached and reused** by Tier 2 fo
 This amortizes AI to near-zero per-page cost — the answer to "LLM scraping is too
 expensive." The LLM is an *optional socket*, never a per-page dependency.
 
+### 2.45 The Website Intelligence Layer — per-domain memory (planned; the differentiator)
+The platform is otherwise stateless: every crawl re-derives everything. The Intelligence
+Layer gives it **memory + a feedback loop**, making the "intelligence" in the name real.
+It is a **cross-cutting store consulted at the edges of the crawl**, not an inline stage:
+
+```
+   READ (before/at crawl):  worker consults the domain profile
+     → needs browser render?  → skip HTTP-then-render waste
+     → known rules for this template? → Tier 2 reuses instead of regenerating
+     → rate-limit / robots history, page-type map, last-seen fingerprints
+                          │  crawl runs (spine + branches)
+   WRITE (after):  update the profile
+     → extraction success + confidence + hit-rate, cost per record
+     → tech fingerprint, render requirement, content fingerprint (change detection)
+```
+
+**It unifies four separately-planned features into one primitive:** the **Rule Library**
+(§2.4), **self-healing** (a dropping rule hit-rate is the trigger), **render-requirement
+detection**, and **cross-crawl verification** (compare against last time). It also gives
+the *analysis* branch **change-over-time** for free ("security score dropped since last
+scan; new exposure appeared") — the headline feature for recurring audits.
+
+Two scopes, because of tenancy:
+- **Global domain facts** (tech stack, render requirement, page-type map, fingerprints)
+  — objective, shareable across orgs as collective knowledge.
+- **Per-org rules & targets** (selectors encode a client's intent) — isolated by `orgId`.
+
+The **feedback loop keeps the memory honest**: rules are versioned + scored by hit-rate;
+a falling hit-rate flags staleness → self-heal (regenerate rule) instead of silently
+returning garbage. Staleness detection *is* the verification problem; the loop is its
+mechanism — the research core, now with a home.
+
+Implementation: a `@crawler/intelligence` package + Mongo collections
+(`domainProfiles` global, `rules` per-org) consulted by the workers. **A package and a
+store, not a new service** — it's a genuine new concern, but adds no deployable.
+
 ### 2.5 Storage & Edge (built)
 MongoDB (jobs, pages, analysis, extraction records, rule library), Redis (queues +
 coordination), S3/MinIO (raw HTML/screenshots, content-hash keys). Stateless Express
@@ -137,10 +173,12 @@ API + React dashboard + streamed export + signed webhooks.
 | `jobs` | job config incl. `mode: analyze \| extract \| both`, plugin/category selection, extraction **target spec**, auth headers (secret) | extend |
 | `pages` | per-page crawl result + `analysis` blob (both branches write here) | built |
 | `extractionRecords` | typed records `{ entity, fields, source, confidence, provenance }` | new |
-| `rules` | **Rule Library**: `{ domain, templateHash, entity, tier, selectorSpec, generatedBy, verifiedAt, hitRate }` — keyed for reuse | new |
+| `domainProfiles` | **Intelligence Layer (global)**: `{ domain, techStack, needsRender, pageTypeMap, contentFingerprints, robotsCache, lastCrawledAt }` — objective facts, shared | new |
+| `rules` | **Intelligence Layer (per-org Rule Library)**: `{ orgId, domain, templateHash, entity, tier, selectorSpec, generatedBy, version, verifiedAt, hitRate, costPerRecord }` — versioned, scored, reused | new |
 
 Multi-tenant from the start (arch-v2): every doc carries `orgId`; blob keys prefixed per
-org; rules are per-org (a client's selectors aren't shared).
+org; **rules & targets are per-org** (a client's selectors aren't shared), while
+**domain facts are global** collective knowledge.
 
 ---
 
@@ -216,7 +254,8 @@ two outputs. That shared crawl is the platform's core efficiency.
 | **Extraction Tier 1** (structured) | ✅ M11 Step 1 |
 | Extraction Tier 2 (CSS/XPath + Rule Library) | ⬜ M11 Step 2 |
 | Discovery (sitemap, listing-vs-detail, target-driven) | ⬜ M12 |
-| Confidence router / verification / self-heal | ⬜ M14 |
+| **Website Intelligence Layer** (domain profile + Rule Library + feedback loop) | ⬜ new — the differentiator |
+| Confidence router / verification / self-heal (driven by the Intelligence Layer's hit-rate) | ⬜ M14 |
 | LLM tier + rule generation (optional socket) | ⬜ M13/M14 |
 | Intent layer (point-click / NL → rules) | ⬜ M13 |
 | Production ops (HA stores, KEDA, OTel, tenancy, CI/CD) | ⬜ arch-v2 backlog |
@@ -238,3 +277,5 @@ production-ops hardening tracked in [gap-analysis.md](gap-analysis.md).
 | E | **LLM is an optional, isolated tier** behind an interface | keeps the platform fully functional rule-only; contains cost/privacy blast radius |
 | F | Extraction runs **in the existing workers**; only the LLM tier may become a service | ADR-0006's "service only when the scaling profile differs" |
 | G | One crawl serves **both branches** (`mode:both`) | the core efficiency: don't crawl twice to audit and extract |
+| H | **Website Intelligence Layer** = per-domain memory (profile + Rule Library + feedback loop), a shared cross-cutting store consulted at the crawl edges | makes "intelligence" real; unifies rule-library + self-heal + render-detection + cross-crawl verification into one primitive; evolutionary, not a redesign |
+| I | Intelligence Layer has **two scopes**: global domain facts (shared) + per-org rules/targets (isolated) | objective facts are collective knowledge; selectors encode client intent |
