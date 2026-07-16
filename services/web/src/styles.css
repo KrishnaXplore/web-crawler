@@ -42,7 +42,7 @@ main { display: grid; grid-template-columns: 320px 1fr; gap: 20px; align-items: 
 .panel h2 { margin: 0 0 14px; font-size: 16px; }
 
 form label { display: block; margin-bottom: 10px; color: var(--muted); font-size: 12px; }
-form input[type="text"], form input:not([type]), form input[type="number"], form textarea {
+form input[type="text"], form input:not([type]), form input[type="number"], form select, form textarea {
   width: 100%;
   margin-top: 4px;
   padding: 8px;
@@ -53,10 +53,13 @@ form input[type="text"], form input:not([type]), form input[type="number"], form
   font-family: inherit;
 }
 form textarea { resize: vertical; font-size: 12px; }
+.hint { display: block; margin-top: 4px; font-size: 11px; line-height: 1.4; }
 .row { display: flex; gap: 10px; }
 .row label { flex: 1; }
 label.check { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 13px; }
 label.check input { width: auto; margin: 0; }
+label.plugin-check { align-items: flex-start; margin-bottom: 8px; }
+label.plugin-check input { margin-top: 2px; }
 fieldset { border: 1px solid var(--border); border-radius: 6px; margin: 12px 0; }
 legend { color: var(--muted); font-size: 12px; padding: 0 6px; }
 
@@ -75,6 +78,7 @@ button:disabled { opacity: 0.6; cursor: default; }
 
 .error { color: #ff6b6b; }
 .muted { color: var(--muted); }
+.extraction-hit { color: var(--ok); font-weight: 500; }
 
 .badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; text-transform: uppercase; }
 .badge.completed { background: rgba(46,160,67,.2); color: var(--ok); }
@@ -97,8 +101,29 @@ button.cancel {
 .stat-label { color: var(--muted); font-size: 11px; }
 .stat-value { font-weight: 600; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.exports { display: flex; gap: 14px; margin-bottom: 12px; }
+.exports { display: flex; gap: 14px; margin-bottom: 12px; align-items: center; }
 .exports a { color: var(--accent); }
+.exports a.download {
+  background: var(--accent); color: #06101f; font-weight: 600;
+  padding: 7px 14px; border-radius: 6px; text-decoration: none;
+}
+
+/* Scraper page (phase 21) */
+.subnav { display: flex; gap: 8px; margin-bottom: 16px; }
+.preview-btn {
+  width: auto; margin: 0; padding: 7px 14px; font-weight: 500; font-size: 13px;
+  background: var(--panel); color: var(--text); border: 1px solid var(--border);
+}
+.modal.modal-wide { max-width: 1000px; }
+.csv-preview { max-height: 60vh; overflow-y: auto; }
+.table-scroll { overflow-x: auto; }
+.data-table th { text-transform: capitalize; white-space: nowrap; }
+td.cell { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toggle-row { margin-top: 14px; }
+.toggle-row table { margin-top: 8px; }
+.empty-note { padding: 14px; background: #10151b; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; }
+.empty-note p { margin: 0 0 6px; }
+.empty-note p:last-child { margin: 0; }
 
 /* Website Health Report (M8) */
 .report { margin: 14px 0; padding: 14px; background: #10151b; border: 1px solid var(--border); border-radius: 8px; }
@@ -122,6 +147,12 @@ tr.clickable:hover td { background: rgba(91,157,255,.08); }
 .detail-analysis { display: grid; gap: 12px; }
 .analysis-block h4 { margin: 0 0 4px; font-size: 12px; color: var(--muted); text-transform: uppercase; }
 .analysis-block pre, .detail-raw pre { margin: 0; padding: 10px; background: #10151b; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; overflow-x: auto; }
+.kv { margin: 0; padding: 8px 10px; background: #10151b; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
+.kv-row { display: flex; gap: 10px; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,.04); }
+.kv-row:last-child { border-bottom: none; }
+.kv-row dt { flex: 0 0 140px; color: var(--muted); word-break: break-word; }
+.kv-row dd { margin: 0; flex: 1; word-break: break-word; }
+.kv-nested { padding: 4px 0 4px 10px; border: none; background: none; }
 .detail-raw { margin-top: 14px; }
 .detail-raw summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 
@@ -132,4 +163,16 @@ td.title { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-sp
 td.analysis { color: var(--muted); font-size: 12px; }
 code { background: #10151b; padding: 1px 6px; border-radius: 4px; }
 
-@media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+@media (max-width: 800px) {
+  main { grid-template-columns: 1fr; }
+  header { flex-wrap: wrap; }
+  /* Flex children default to min-width:auto and won't shrink below their
+     content, so number inputs and long checkbox labels overflow narrow
+     screens. Stack the depth/pages row and let the labels shrink+wrap. */
+  .row { flex-wrap: wrap; }
+  .row label { flex-basis: 100%; }
+  /* <fieldset> has an implicit min-width:min-content that its long option
+     labels set, so it won't shrink below them — reset it so it fits. */
+  fieldset { min-width: 0; }
+  label.check span, label.plugin-check span { min-width: 0; overflow-wrap: anywhere; }
+}

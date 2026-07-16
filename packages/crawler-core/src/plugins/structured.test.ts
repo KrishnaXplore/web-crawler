@@ -60,6 +60,28 @@ describe("structured extractor (M11 Step 1)", () => {
     expect(r.source).toBe("opengraph");
   });
 
+  it("extracts price/priceCurrency from a nested Offer object (was silently dropped)", () => {
+    const r = s(`<script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Product","name":"Phone",
+       "brand":{"@type":"Brand","name":"Redmi"},
+       "offers":{"@type":"Offer","price":"12999","priceCurrency":"INR"}}
+    </script>`);
+    expect(r.fields.name).toBe("Phone");
+    expect(r.fields.brand).toBe("Redmi");
+    expect(r.fields.price).toBe("12999");
+    expect(r.fields.priceCurrency).toBe("INR");
+    expect(r.fields.offers).toBeUndefined(); // hoisted, not left as a dropped nested key
+  });
+
+  it("extracts price from an array of Offer nodes (multiple sellers/conditions)", () => {
+    const r = s(`<script type="application/ld+json">
+      {"@type":"Product","name":"Widget",
+       "offers":[{"@type":"Offer","price":"49.99","priceCurrency":"USD"},
+                 {"@type":"Offer","price":"59.99","priceCurrency":"USD"}]}
+    </script>`);
+    expect(r.fields.price).toBe("49.99"); // first offer wins — cheap tier, no aggregation
+  });
+
   it("returns none on a page with no structured data", () => {
     const r = s(`<h1>Plain</h1><p>nothing here</p>`);
     expect(r.source).toBe("none");

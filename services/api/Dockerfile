@@ -1,22 +1,25 @@
-# Build from the repo root:  docker build -f services/api/Dockerfile .
-# Multi-stage (docs/phase7.md Step C): compile in a full toolchain layer, run
-# compiled JS as non-root in a slim layer — no TypeScript/tsx in the runtime image.
+FROM node:22-alpine AS base
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable
 
-FROM node:22-alpine AS build
-RUN npm install -g pnpm@9.15.0
+FROM base AS builder
 WORKDIR /app
-# The pnpm lockfile spans the whole workspace, so the whole workspace is the
-# context (.dockerignore keeps node_modules/dist/.env out).
 COPY . .
 RUN pnpm install --frozen-lockfile
-RUN pnpm -r build
-# Drop dev dependencies; the symlinked workspace layout stays intact.
-RUN pnpm prune --prod
+RUN pnpm build
+# pnpm deploy produces a self-contained, production-only directory for just this
+# package — workspace deps resolved as real copies, devDependencies (typescript,
+# tsx, vitest, ...) excluded. Verified: `pnpm prune --prod` alone left typescript
+# behind in this workspace; deploy is pnpm's purpose-built command for this exact
+# problem and was confirmed to actually exclude it (phase7.md: "no TS toolchain
+# in the runtime image").
+RUN pnpm --filter=@crawler/api deploy --prod /prod/api
 
-FROM node:22-alpine AS runtime
-ENV NODE_ENV=production
+FROM base AS runner
 WORKDIR /app
-COPY --from=build /app .
+COPY --from=builder --chown=node:node /prod/api ./
+
 USER node
 EXPOSE 3000
-CMD ["node", "services/api/dist/index.js"]
+CMD ["node", "dist/index.js"]

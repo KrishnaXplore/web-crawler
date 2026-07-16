@@ -1,5 +1,5 @@
 import { normalizeUrl } from "@crawler/shared";
-import { extractLinks, countLinkScope } from "./extractLinks.js";
+import { extractLinks, countLinkScope, type LinkCandidate } from "./extractLinks.js";
 import { parseMeta } from "./parse.js";
 import { SsrfError } from "./ssrfGuard.js";
 import type { FetchResult } from "./fetch.js";
@@ -29,7 +29,8 @@ export interface CrawlPageResult {
   readonly contentType: string | null;
   readonly title: string | null;
   readonly description: string | null;
-  readonly links: string[];
+  /** Discovered links with anchor text (M16 — feeds the Discovery Engine's link scorer). */
+  readonly links: LinkCandidate[];
   /** Outgoing links split by scope (M8 Step C). */
   readonly internalLinks: number;
   readonly externalLinks: number;

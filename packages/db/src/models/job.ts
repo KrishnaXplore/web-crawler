@@ -24,6 +24,12 @@ const jobSchema = new Schema(
     requestHeaders: { type: Schema.Types.Mixed, default: null },
     exposurePatterns: { type: [String], default: [] },
     exposureReveal: { type: Boolean, default: false },
+    // Natural language extraction intent (M13), read by the worker/renderer and
+    // threaded into runPlugins() to drive Tier 4 rule generation.
+    intent: { type: String, default: null },
+    // Focused-crawl mode (M23): navigate toward the intent's target pages and
+    // stop early once a single-record page covers it.
+    focusedCrawl: { type: Boolean, default: false },
     status: {
       type: String,
       // cancelling → cancelled is the two-phase cancel (M6): between the API call

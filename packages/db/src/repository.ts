@@ -23,6 +23,8 @@ export async function createJob(input: JobRecordInput): Promise<void> {
     requestHeaders: input.requestHeaders ?? null,
     exposurePatterns: input.exposurePatterns ?? [],
     exposureReveal: input.exposureReveal ?? false,
+    intent: input.intent ?? null,
+    focusedCrawl: input.focusedCrawl ?? false,
   });
 }
 
@@ -108,6 +110,8 @@ export async function getJobConfig(jobId: string): Promise<JobConfig | null> {
       (doc.requestHeaders as Record<string, string> | null | undefined) ?? null,
     exposurePatterns: doc.exposurePatterns ?? [],
     exposureReveal: doc.exposureReveal ?? false,
+    intent: (doc.intent as string | null | undefined) ?? undefined,
+    focusedCrawl: doc.focusedCrawl ?? false,
   };
 }
 
@@ -206,6 +210,7 @@ export interface PageExport {
   readonly description: string | null;
   readonly depth: number;
   readonly discoveredLinks: number;
+  readonly analysis: Record<string, unknown> | null;
 }
 
 /** Stream a job's pages from a Mongo cursor (M5 Step E) — bounded memory for export. */
@@ -222,6 +227,7 @@ export async function* iteratePages(
       description: d.description ?? null,
       depth: d.depth,
       discoveredLinks: d.discoveredLinks,
+      analysis: (d.analysis as Record<string, unknown> | null) ?? null,
     };
   }
 }

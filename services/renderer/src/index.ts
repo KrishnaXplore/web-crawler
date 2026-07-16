@@ -7,7 +7,10 @@
  */
 import { createServer } from "node:http";
 import { Worker } from "bullmq";
-import { chromium, type Browser } from "playwright";
+import { chromium } from "playwright-extra";
+import type { Browser } from "playwright";
+import stealth from "puppeteer-extra-plugin-stealth";
+import { ProxyProvider } from "./proxy.js";
 import { loadEnv } from "@crawler/config";
 import { createLogger } from "@crawler/logger";
 import { metricsText, contentType, pagesTotal, fetchDuration } from "@crawler/metrics";
@@ -19,6 +22,8 @@ import {
   enqueueWebhook,
   finishUrl,
   isCancelled,
+  isGoalMet,
+  markGoalMet,
   acquireDomainSlot,
   RENDER_QUEUE,
   type CrawlJobData,
@@ -34,14 +39,27 @@ import {
   recordDomainObservation,
   getRulesForDomain,
   upsertRule,
+  recordRuleUsage,
+  getDomainProfile,
+  matchingPathHints,
+  recordPathHint,
 } from "@crawler/db";
 import { createBlobStore } from "@crawler/storage";
-import { type JobConfig } from "@crawler/shared";
+import { type JobConfig, type ExtractionRule } from "@crawler/shared";
 import {
   crawlUrl,
   fetchPage,
   parseRobots,
   runPlugins,
+  mockLlmSocket,
+  createGeminiLlmSocket,
+  scoreLinks,
+  focusLinks,
+  keywordsFromIntent,
+  classifyIntentTarget,
+  isIntentCovered,
+  normalizeAnalysis,
+  findNextPageUrl,
   type CrawlDeps,
   type RobotsRules,
 } from "@crawler/core";
@@ -50,6 +68,14 @@ import { renderPage } from "./render.js";
 const log = createLogger("renderer");
 const env = loadEnv();
 const UA = env.CRAWL_USER_AGENT;
+
+const proxyProvider = new ProxyProvider();
+
+// Tier 4 (M15): real Gemini calls when a key is configured, otherwise the mock
+// keeps working exactly as before — the platform never requires an API key.
+const llmSocket = env.GEMINI_API_KEY
+  ? createGeminiLlmSocket({ apiKey: env.GEMINI_API_KEY, model: env.GEMINI_MODEL })
+  : mockLlmSocket;
 
 const redis = createRedis();
 const renderQueue = createRenderQueue(redis);
@@ -134,6 +160,7 @@ const worker = new Worker<CrawlJobData>(
           userAgent: UA,
           timeoutMs: env.RENDER_TIMEOUT_MS,
           requestHeaders: cfg.requestHeaders ?? undefined,
+          proxy: proxyProvider.getProxy(),
         }),
       robotsFor,
     };
@@ -145,6 +172,9 @@ const worker = new Worker<CrawlJobData>(
     });
     endTimer();
     pagesTotal.inc({ outcome: result.outcome });
+
+    // Hoisted for the pagination block (M25) — see services/worker.
+    let isListingResult = false;
 
     if (result.outcome === "ok") {
       if (!bucketEnsured) {
@@ -160,11 +190,14 @@ const worker = new Worker<CrawlJobData>(
         htmlBytes = put.bytes;
       }
 
-      // cheerio plugins over the rendered DOM.
+      // cheerio plugins over the rendered DOM. Both rule kinds are fetched up
+      // front (M22) — the page's detail/listing classification happens inside
+      // runPlugins, which picks the right one.
       let rules = null;
+      let listRules = null;
       if (cfg.plugins.includes("rules")) {
-        const hostname = new URL(result.url).hostname;
         rules = await getRulesForDomain(hostname);
+        listRules = await getRulesForDomain(hostname, "list");
       }
 
       const analysis =
@@ -181,14 +214,68 @@ const worker = new Worker<CrawlJobData>(
                   reveal: cfg.exposureReveal ?? false,
                 },
                 rules: rules ?? undefined,
+                listRules: listRules ?? undefined,
               },
               intent: cfg.intent,
+              llmSocket,
             })
           : null;
 
-      if (analysis?.rules && (analysis.rules as any).generatedRules) {
-        await upsertRule((analysis.rules as any).generatedRules);
-        log.info({ url: result.url }, "Persisted LLM-generated extraction rules");
+      // Value normalization (M24) — see services/worker for the rationale.
+      normalizeAnalysis(analysis);
+
+      {
+        const pageType = (analysis?.discovery as { pageType?: string } | undefined)?.pageType;
+        const recordCount =
+          (analysis?.rules as { records?: unknown[] } | undefined)?.records?.length ?? 0;
+        isListingResult = pageType === "listing" || recordCount > 1;
+      }
+
+      // Rule Library feedback loop (gap-analysis fix #7) — see services/worker for
+      // the full rationale; identical wiring here since browser-mode crawls go
+      // through the same `rules` tier.
+      const rulesOut = analysis?.rules as
+        | { confidence?: "high" | "low" | "none"; generatedRules?: ExtractionRule }
+        | undefined;
+      if (rulesOut?.generatedRules) {
+        await upsertRule(rulesOut.generatedRules, { generatedBy: "llm" });
+        log.info({ url: result.url, domain: hostname }, "persisted LLM-generated extraction rules");
+      }
+      if (rulesOut?.confidence !== undefined) {
+        const ruleKind =
+          (analysis?.discovery as { pageType?: string } | undefined)?.pageType === "listing"
+            ? ("list" as const)
+            : ("detail" as const);
+        void recordRuleUsage(hostname, rulesOut.confidence !== "none", ruleKind).catch(
+          () => undefined,
+        );
+      }
+
+      // Discovery Engine Step B (M18) — see services/worker for the full rationale.
+      const structuredOut = analysis?.structured as { confidence?: string } | undefined;
+      const extractionSucceeded =
+        (structuredOut?.confidence !== undefined && structuredOut.confidence !== "none") ||
+        (rulesOut?.confidence !== undefined && rulesOut.confidence !== "none");
+      if (cfg.intent && extractionSucceeded) {
+        const keywords = keywordsFromIntent(cfg.intent);
+        void recordPathHint(hostname, keywords, new URL(result.url).pathname).catch(() => undefined);
+      }
+
+      // Focused-crawl early stop (M23) — see services/worker for the full rationale.
+      if (cfg.focusedCrawl && cfg.intent && extractionSucceeded) {
+        const pageType = (analysis?.discovery as { pageType?: string } | undefined)?.pageType;
+        const rulesRecords = (analysis?.rules as { records?: unknown[] } | undefined)?.records;
+        const isSingleRecord = pageType !== "listing" && !(rulesRecords && rulesRecords.length > 1);
+        if (classifyIntentTarget(cfg.intent) === "detail" && isSingleRecord) {
+          const fields = {
+            ...((structuredOut as { fields?: Record<string, unknown> } | undefined)?.fields ?? {}),
+            ...((rulesOut as { fields?: Record<string, unknown> } | undefined)?.fields ?? {}),
+          };
+          if (isIntentCovered(fields, cfg.intent)) {
+            await markGoalMet(redis, data.jobId).catch(() => undefined);
+            log.info({ jobId: data.jobId, url: result.url }, "focused crawl: goal met, winding down");
+          }
+        }
       }
 
       await upsertPage({
@@ -229,14 +316,49 @@ const worker = new Worker<CrawlJobData>(
 
     if (result.outcome === "error") throw new Error(result.error ?? "render failed");
 
-    if (result.outcome === "ok" && data.depth < cfg.maxDepth) {
-      for (const link of result.links) {
+    const goalMet = cfg.focusedCrawl ? await isGoalMet(redis, data.jobId) : false;
+
+    if (result.outcome === "ok" && data.depth < cfg.maxDepth && !goalMet) {
+      // Discovery Engine, Stage A (M16) + Step B (M18) — see services/worker for the
+      // full rationale. Focused mode + detail intent hard-filters via focusLinks.
+      let links = result.links;
+      if (cfg.intent) {
+        const keywords = keywordsFromIntent(cfg.intent);
+        const knownGoodPaths = await getDomainProfile(hostname)
+          .then((profile) =>
+            profile ? matchingPathHints(profile.pathHints, keywords).map((h) => h.path) : [],
+          )
+          .catch(() => []);
+        links =
+          cfg.focusedCrawl && classifyIntentTarget(cfg.intent) === "detail"
+            ? focusLinks(result.links, cfg.intent, knownGoodPaths)
+            : scoreLinks(result.links, cfg.intent, knownGoodPaths);
+      }
+      for (const link of links) {
         await enqueueUrl(
           renderQueue,
           redis,
-          { jobId: data.jobId, url: link, depth: data.depth + 1, parentUrl: data.url },
+          { jobId: data.jobId, url: link.url, depth: data.depth + 1, parentUrl: data.url },
           cfg.maxPages,
         );
+      }
+    }
+
+    // Pagination following (M25) — see services/worker for the full rationale.
+    if (result.outcome === "ok" && result.html && cfg.intent && !goalMet) {
+      if (classifyIntentTarget(cfg.intent) === "collection" && isListingResult) {
+        const nextUrl = findNextPageUrl(result.html, result.url);
+        const sameHost =
+          nextUrl !== null &&
+          (!cfg.sameHostOnly || new URL(nextUrl).hostname === new URL(result.url).hostname);
+        if (nextUrl && sameHost) {
+          await enqueueUrl(
+            renderQueue,
+            redis,
+            { jobId: data.jobId, url: nextUrl, depth: data.depth, parentUrl: data.url },
+            cfg.maxPages,
+          );
+        }
       }
     }
   },
@@ -303,7 +425,11 @@ worker.on("ready", () =>
 // Launch the browser and connect Mongo AFTER the Worker is already running. The
 // handler blocks on `browserReady` until this resolves, so a job claimed during
 // startup simply waits a beat rather than racing an undefined browser.
-browser = await chromium.launch({ args: ["--no-sandbox"] });
+chromium.use(stealth());
+browser = await chromium.launch({
+  headless: env.RENDER_HEADLESS,
+  args: ["--no-sandbox", "--disable-setuid-sandbox"],
+});
 await connectMongo();
 markBrowserReady!();
 log.info("browser launched, mongo connected — renders can proceed");

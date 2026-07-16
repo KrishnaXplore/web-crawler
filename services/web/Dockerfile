@@ -1,15 +1,18 @@
-# Build from the repo root:  docker build -f services/web/Dockerfile .
-# vite build → static files served by nginx, which proxies /api to the api
-# container (services/web/nginx.conf) — no CORS, same shape as dev.
+FROM node:20-alpine AS builder
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable
 
-FROM node:22-alpine AS build
-RUN npm install -g pnpm@9.15.0
 WORKDIR /app
 COPY . .
 RUN pnpm install --frozen-lockfile
-RUN pnpm --filter @crawler/web build
+RUN pnpm build
 
-FROM nginx:1.27-alpine
+FROM nginx:alpine AS runner
+# nginx.conf proxies /api/* to the api container (same-origin, no CORS — the
+# production shape from architecture-v2 §2 / phase5d). Without it the containerized
+# dashboard has nowhere to send its API calls.
 COPY services/web/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/services/web/dist /usr/share/nginx/html
+COPY --from=builder /app/services/web/dist /usr/share/nginx/html
 EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]

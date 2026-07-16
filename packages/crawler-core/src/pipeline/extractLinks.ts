@@ -7,8 +7,19 @@ export interface ExtractOptions {
 }
 
 /**
+ * A discovered link plus its visible anchor text (M16) — the anchor text is the
+ * cheapest, highest-value signal for the Discovery Engine's pre-fetch link
+ * scorer (packages/crawler-core/src/discovery/linkScorer.ts) to decide crawl
+ * order. Read once here rather than thrown away, so nothing needs a second pass.
+ */
+export interface LinkCandidate {
+  readonly url: string;
+  readonly anchorText: string;
+}
+
+/**
  * Extract, resolve, normalize, scope-filter, and de-dupe the `<a href>` links in
- * an HTML document (workflow.md Phase 4.5).
+ * an HTML document (workflow.md Phase 4.5), keeping each link's anchor text.
  *
  * `pageUrl` is the normalized URL the HTML was fetched from; relative links
  * resolve against it, honoring a `<base href>` if present. Links that are not
@@ -18,7 +29,7 @@ export function extractLinks(
   html: string,
   pageUrl: string,
   options: ExtractOptions,
-): string[] {
+): LinkCandidate[] {
   const $ = cheerio.load(html);
 
   // Honor <base href> for relative resolution; ignore a malformed one.
@@ -34,7 +45,7 @@ export function extractLinks(
 
   const self = normalizeUrl(pageUrl);
   const pageHost = hostOf(pageUrl);
-  const out = new Set<string>();
+  const out = new Map<string, string>(); // normalized url -> first-seen anchor text
 
   $("a[href]").each((_, el) => {
     const href = $(el).attr("href");
@@ -50,10 +61,10 @@ export function extractLinks(
     // page never re-enqueues the URL currently being crawled.
     if (normalized === self) return;
     if (options.sameHostOnly && hostOf(normalized) !== pageHost) return;
-    out.add(normalized);
+    if (!out.has(normalized)) out.set(normalized, $(el).text().trim());
   });
 
-  return [...out];
+  return [...out.entries()].map(([url, anchorText]) => ({ url, anchorText }));
 }
 
 /**

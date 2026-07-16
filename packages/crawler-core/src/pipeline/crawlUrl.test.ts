@@ -29,7 +29,10 @@ describe("crawlUrl", () => {
     const r = await crawlUrl("http://a.com/", deps, opts);
     expect(r.outcome).toBe("ok");
     expect(r.title).toBe("Home");
-    expect(r.links).toEqual(["http://a.com/x", "http://b.com/y"]);
+    expect(r.links).toEqual([
+      { url: "http://a.com/x", anchorText: "x" },
+      { url: "http://b.com/y", anchorText: "y" },
+    ]);
   });
 
   it("returns no links for non-HTML content", async () => {
@@ -81,6 +84,6 @@ describe("crawlUrl", () => {
       sameHostOnly: true,
       respectRobots: false,
     });
-    expect(r.links).toEqual(["http://a.com/keep"]);
+    expect(r.links).toEqual([{ url: "http://a.com/keep", anchorText: "k" }]);
   });
 });

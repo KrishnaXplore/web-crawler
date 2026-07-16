@@ -15,6 +15,7 @@ export interface CreateJobInput {
   exposureReveal?: boolean;
   renderMode?: "http" | "browser" | "auto";
   intent?: string;
+  focusedCrawl?: boolean;
 }
 
 export interface JobStatus {
@@ -67,8 +68,21 @@ const BASE = "/api";
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? `request failed (${res.status})`);
+    const body = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      issues?: { path?: string; message?: string }[];
+    };
+    // Surface WHAT failed, not just that something did — "validation failed"
+    // alone sends the user hunting through every field.
+    const detail = body.issues
+      ?.map((i) => (i.path ? `${i.path}: ${i.message}` : i.message))
+      .filter(Boolean)
+      .join("; ");
+    throw new Error(
+      detail
+        ? `${body.error ?? "request failed"} — ${detail}`
+        : (body.error ?? `request failed (${res.status})`),
+    );
   }
   return res.json() as Promise<T>;
 }

@@ -20,7 +20,9 @@
     "@crawler/storage": "workspace:*",
     "bullmq": "^5.34.0",
     "ioredis": "^5.4.2",
-    "playwright": "^1.49.1"
+    "playwright": "^1.49.1",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
   },
   "devDependencies": {
     "tsx": "^4.19.2",

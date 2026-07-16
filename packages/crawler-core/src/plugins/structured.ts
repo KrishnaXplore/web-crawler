@@ -27,14 +27,44 @@ function firstType(t: unknown): string | null {
   return null;
 }
 
+/**
+ * Pull price/currency out of a schema.org Offer or AggregateOffer node — these
+ * don't have a name/url/@id scalar, so the generic nested-object pick below
+ * always dropped them silently (e.g. a Product's real price went missing even
+ * though it was right there in the JSON-LD).
+ */
+function pickOfferFields(offer: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  const price = offer.price ?? offer.lowPrice;
+  const currency = offer.priceCurrency;
+  if (typeof price === "string" || typeof price === "number") out.price = String(price);
+  if (typeof currency === "string") out.priceCurrency = currency;
+  return out;
+}
+
 /** Flatten a JSON-LD node's scalar/string props into a flat field map. */
 function flattenNode(node: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(node)) {
     if (k.startsWith("@")) continue;
-    if (typeof v === "string" || typeof v === "number") out[k] = String(v);
-    else if (v && typeof v === "object" && !Array.isArray(v)) {
-      // one level of nesting: pick a name/url-ish scalar (author.name, image.url…)
+
+    if (typeof v === "string" || typeof v === "number") {
+      out[k] = String(v);
+      continue;
+    }
+
+    // offers can be a single Offer or an array of them (multiple sellers/conditions)
+    // — hoist price + priceCurrency to top level instead of the generic pick below.
+    if (k === "offers") {
+      const offerNode = Array.isArray(v) ? v[0] : v;
+      if (offerNode && typeof offerNode === "object") {
+        Object.assign(out, pickOfferFields(offerNode as Record<string, unknown>));
+      }
+      continue;
+    }
+
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      // one level of nesting: pick a name/url-ish scalar (author.name, brand.name, image.url…)
       const o = v as Record<string, unknown>;
       const pick = o.name ?? o.url ?? o["@id"];
       if (typeof pick === "string") out[k] = pick;

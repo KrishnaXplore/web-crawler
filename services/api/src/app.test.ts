@@ -17,6 +17,9 @@ vi.mock("@crawler/db", () => ({
   buildReport: vi.fn(),
   markJobCancelling: vi.fn(),
   getDomainProfile: vi.fn(),
+  getRuleWithMeta: vi.fn(),
+  upsertRule: vi.fn(),
+  isMongoReady: vi.fn().mockReturnValue(true),
 }));
 
 // Validation + health paths don't touch Redis/Mongo; cancel needs only redis.set
@@ -95,11 +98,17 @@ describe("api", () => {
     const { getDomainProfile, createJob } = await import("@crawler/db");
     vi.mocked(getDomainProfile).mockResolvedValue({
       domain: "example.com",
+      firstSeenAt: new Date().toISOString(),
+      lastSeenAt: new Date().toISOString(),
+      pagesObserved: 3,
+      techStack: [],
       needsRender: true,
       renderModesSeen: ["browser"],
-      lastCrawled: new Date(),
+      lastStatusOk: true,
+      pathHints: [],
+      httpChallengeSeen: false,
     });
-    vi.mocked(createJob).mockResolvedValue("job123");
+    vi.mocked(createJob).mockResolvedValue(undefined);
 
     const r = await request(app)
       .post("/jobs")
@@ -114,7 +123,7 @@ describe("api", () => {
   it("POST /jobs resolves 'auto' renderMode to 'http' if domain does not needRender", async () => {
     const { getDomainProfile, createJob } = await import("@crawler/db");
     vi.mocked(getDomainProfile).mockResolvedValue(null);
-    vi.mocked(createJob).mockResolvedValue("job124");
+    vi.mocked(createJob).mockResolvedValue(undefined);
 
     const r = await request(app)
       .post("/jobs")

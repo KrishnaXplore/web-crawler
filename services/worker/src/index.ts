@@ -15,6 +15,8 @@ import {
   enqueueUrl,
   finishUrl,
   isCancelled,
+  isGoalMet,
+  markGoalMet,
   acquireDomainSlot,
   createWebhookQueue,
   enqueueWebhook,
@@ -26,6 +28,7 @@ import {
 import {
   connectMongo,
   disconnectMongo,
+  isMongoReady,
   getJob,
   getJobConfig,
   upsertPage,
@@ -34,9 +37,13 @@ import {
   recordDomainObservation,
   getRulesForDomain,
   upsertRule,
+  recordRuleUsage,
+  getDomainProfile,
+  matchingPathHints,
+  recordPathHint,
 } from "@crawler/db";
 import { createBlobStore } from "@crawler/storage";
-import { type JobConfig } from "@crawler/shared";
+import { type JobConfig, type ExtractionRule } from "@crawler/shared";
 import {
   crawlUrl,
   fetchPage,
@@ -44,6 +51,16 @@ import {
   runPlugins,
   deliverWebhook,
   SsrfError,
+  mockLlmSocket,
+  createGeminiLlmSocket,
+  scoreLinks,
+  focusLinks,
+  keywordsFromIntent,
+  classifyIntentTarget,
+  isIntentCovered,
+  normalizeAnalysis,
+  findNextPageUrl,
+  looksLikeBotChallenge,
   type CrawlDeps,
   type RobotsRules,
 } from "@crawler/core";
@@ -51,6 +68,12 @@ import {
 const log = createLogger("worker");
 const env = loadEnv();
 const UA = env.CRAWL_USER_AGENT;
+
+// Tier 4 (M15): real Gemini calls when a key is configured, otherwise the mock
+// keeps working exactly as before — the platform never requires an API key.
+const llmSocket = env.GEMINI_API_KEY
+  ? createGeminiLlmSocket({ apiKey: env.GEMINI_API_KEY, model: env.GEMINI_MODEL })
+  : mockLlmSocket;
 
 const connection = createRedis(); // dedicated connection for the BullMQ Worker
 const redis = createRedis(); // for queue add + our SADD / counters
@@ -148,6 +171,10 @@ const worker = new Worker<CrawlJobData>(
     endTimer();
     pagesTotal.inc({ outcome: result.outcome });
 
+    // Hoisted for the pagination block below (M25), which sits outside the
+    // persistence scope where `analysis` lives.
+    let isListingResult = false;
+
     // Persist page metadata (workflow Phase 5). Idempotent on (jobId, url).
     if (result.outcome === "ok") {
       // Metadata/blob split: bytes → MinIO (opt-in), only the key → Mongo.
@@ -167,10 +194,13 @@ const worker = new Worker<CrawlJobData>(
       }
 
       // Analyzer plugins (M5 Step C): run the enabled ones over the page.
+      // Both rule kinds are fetched up front (M22) — the page's detail/listing
+      // classification happens inside runPlugins, which picks the right one.
       let rules = null;
+      let listRules = null;
       if (cfg.plugins.includes("rules")) {
-        const hostname = new URL(result.url).hostname;
         rules = await getRulesForDomain(hostname);
+        listRules = await getRulesForDomain(hostname, "list");
       }
 
       const analysis =
@@ -187,16 +217,85 @@ const worker = new Worker<CrawlJobData>(
                   reveal: cfg.exposureReveal ?? false,
                 },
                 rules: rules ?? undefined,
+                listRules: listRules ?? undefined,
               },
+              intent: cfg.intent,
+              llmSocket,
             })
           : null;
 
-      // M13/M14 Intent Layer (Self Healing): 
-      // If the rules plugin generated new rules (because none existed, or they failed),
-      // we save them back to the domain profile's Rule Library.
-      if (analysis?.rules && (analysis.rules as any).generatedRules) {
-        await upsertRule((analysis.rules as any).generatedRules);
-        log.info({ url: result.url }, "Persisted LLM-generated extraction rules");
+      // Value normalization (M24): enrich price-like extracted values with
+      // numeric `_amount` + `_currency` siblings so the CSV/table are
+      // spreadsheet-usable. Additive; runs after extraction, before persist.
+      normalizeAnalysis(analysis);
+
+      // Did this page read as a listing? (M25 pagination gate — computed here
+      // where `analysis` is in scope.)
+      {
+        const pageType = (analysis?.discovery as { pageType?: string } | undefined)?.pageType;
+        const recordCount =
+          (analysis?.rules as { records?: unknown[] } | undefined)?.records?.length ?? 0;
+        isListingResult = pageType === "listing" || recordCount > 1;
+      }
+
+      // Rule Library feedback loop (gap-analysis fix #7, architecture-v3 §2.45): a
+      // freshly-generated rule (Tier 4/LLM) is saved for reuse; any time the `rules`
+      // tier actually ran — existing rule or just-generated — its confidence is the
+      // real signal of whether the selectors work on this page, so it's recorded as
+      // a hit/miss for a future self-heal step to watch for staleness. Both are
+      // best-effort — never fail the crawl over Rule Library bookkeeping.
+      const rulesOut = analysis?.rules as
+        | { confidence?: "high" | "low" | "none"; generatedRules?: ExtractionRule }
+        | undefined;
+      if (rulesOut?.generatedRules) {
+        await upsertRule(rulesOut.generatedRules, { generatedBy: "llm" });
+        log.info({ url: result.url, domain: hostname }, "persisted LLM-generated extraction rules");
+      }
+      if (rulesOut?.confidence !== undefined) {
+        // Listing pages exercise the domain's LIST rule (M22) — its hit/miss
+        // bookkeeping (and any self-heal) must not touch the detail rule.
+        const ruleKind =
+          (analysis?.discovery as { pageType?: string } | undefined)?.pageType === "listing"
+            ? ("list" as const)
+            : ("detail" as const);
+        void recordRuleUsage(hostname, rulesOut.confidence !== "none", ruleKind).catch(
+          () => undefined,
+        );
+      }
+
+      // Discovery Engine Step B (M18): if this page — reached via a scored link or
+      // chosen as the seed — actually produced extraction results, remember its path
+      // for this intent so a later crawl on the same domain can skip straight to it.
+      // Best-effort, never blocks the crawl.
+      const structuredOut = analysis?.structured as { confidence?: string } | undefined;
+      const extractionSucceeded =
+        (structuredOut?.confidence !== undefined && structuredOut.confidence !== "none") ||
+        (rulesOut?.confidence !== undefined && rulesOut.confidence !== "none");
+      if (cfg.intent && extractionSucceeded) {
+        const keywords = keywordsFromIntent(cfg.intent);
+        void recordPathHint(hostname, keywords, new URL(result.url).pathname).catch(() => undefined);
+      }
+
+      // Focused-crawl early stop (M23): for a DETAIL intent, once a single-record
+      // page covers the requested fields, the goal is met — flag the job so the
+      // enqueue loop stops expanding. Gated on runtime evidence, not just the
+      // intent classifier: a listing page (records[] — collection evidence)
+      // never trips this, so a collection mis-labelled "detail" self-corrects the
+      // moment the crawler reaches an actual listing.
+      if (cfg.focusedCrawl && cfg.intent && extractionSucceeded) {
+        const pageType = (analysis?.discovery as { pageType?: string } | undefined)?.pageType;
+        const rulesRecords = (analysis?.rules as { records?: unknown[] } | undefined)?.records;
+        const isSingleRecord = pageType !== "listing" && !(rulesRecords && rulesRecords.length > 1);
+        if (classifyIntentTarget(cfg.intent) === "detail" && isSingleRecord) {
+          const fields = {
+            ...((structuredOut as { fields?: Record<string, unknown> } | undefined)?.fields ?? {}),
+            ...((rulesOut as { fields?: Record<string, unknown> } | undefined)?.fields ?? {}),
+          };
+          if (isIntentCovered(fields, cfg.intent)) {
+            await markGoalMet(redis, data.jobId).catch(() => undefined);
+            log.info({ jobId: data.jobId, url: result.url }, "focused crawl: goal met, winding down");
+          }
+        }
       }
 
       await upsertPage({
@@ -222,10 +321,14 @@ const worker = new Worker<CrawlJobData>(
       // profile-write failure must never fail the crawl.
       const tech =
         (analysis?.tech as { detected?: string[] } | undefined)?.detected ?? [];
+      // M20: HTTP mode only — the renderer already executes JS, so it's not the one
+      // that needs to escalate. Flagging this feeds needsRender, so the *next* auto
+      // crawl on this domain routes to the renderer without any manual intervention.
       void recordDomainObservation(hostname, {
         tech,
         renderMode: "http",
         statusOk: (result.status ?? 0) >= 200 && (result.status ?? 0) < 400,
+        httpChallengeDetected: looksLikeBotChallenge(result.html ?? "", result.links.length),
       }).catch(() => undefined);
     }
 
@@ -248,19 +351,70 @@ const worker = new Worker<CrawlJobData>(
       throw new Error(result.error ?? "crawl failed");
     }
 
-    if (result.outcome === "ok" && data.depth < cfg.maxDepth) {
-      for (const link of result.links) {
+    // Focused-crawl early stop (M23): the goal has already been satisfied by an
+    // earlier page — don't expand further. Already-queued work still drains via
+    // the normal completion accounting, same as cancel.
+    const goalMet = cfg.focusedCrawl ? await isGoalMet(redis, data.jobId) : false;
+
+    if (result.outcome === "ok" && data.depth < cfg.maxDepth && !goalMet) {
+      // Discovery Engine, Stage A (M16) + Step B (M18): with an intent set, crawl the
+      // links most likely to lead there first — the page budget (maxPages) is a hard
+      // cap enforced at enqueue time, so *order* here determines which links actually
+      // survive it, not just which get processed first. Step B: a path this domain has
+      // already confirmed works for an overlapping intent outranks a plain keyword
+      // guess (one extra Mongo read, best-effort — a lookup failure just means no
+      // boost this time, never blocks the crawl). No intent → no scoring → original
+      // DOM order, unchanged from before M16.
+      let links = result.links;
+      if (cfg.intent) {
+        const keywords = keywordsFromIntent(cfg.intent);
+        const knownGoodPaths = await getDomainProfile(hostname)
+          .then((profile) =>
+            profile ? matchingPathHints(profile.pathHints, keywords).map((h) => h.path) : [],
+          )
+          .catch(() => []);
+        // Focused mode + DETAIL intent: hard-filter to links leading toward a
+        // product/detail page (focusLinks). Collection intents keep breadth
+        // (plain scoreLinks) — a listing crawl wants every product link, and
+        // those often don't keyword-match. See docs/phase23.md.
+        links =
+          cfg.focusedCrawl && classifyIntentTarget(cfg.intent) === "detail"
+            ? focusLinks(result.links, cfg.intent, knownGoodPaths)
+            : scoreLinks(result.links, cfg.intent, knownGoodPaths);
+      }
+      for (const link of links) {
         await enqueueUrl(
           queue,
           redis,
           {
             jobId: data.jobId,
-            url: link,
+            url: link.url,
             depth: data.depth + 1,
             parentUrl: data.url,
           },
           cfg.maxPages,
         );
+      }
+    }
+
+    // Pagination following (M25): for a COLLECTION intent on a LISTING page,
+    // walk the result set by enqueuing the "next page" at the SAME depth — so a
+    // deep pagination chain is bounded by maxPages, not maxDepth, and works even
+    // at maxDepth 0. Detail/focused crawls want to stop, not gather breadth.
+    if (result.outcome === "ok" && result.html && cfg.intent && !goalMet) {
+      if (classifyIntentTarget(cfg.intent) === "collection" && isListingResult) {
+        const nextUrl = findNextPageUrl(result.html, result.url);
+        const sameHost =
+          nextUrl !== null &&
+          (!cfg.sameHostOnly || new URL(nextUrl).hostname === new URL(result.url).hostname);
+        if (nextUrl && sameHost) {
+          await enqueueUrl(
+            queue,
+            redis,
+            { jobId: data.jobId, url: nextUrl, depth: data.depth, parentUrl: data.url },
+            cfg.maxPages,
+          );
+        }
       }
     }
   },
@@ -337,14 +491,31 @@ await connectMongo();
 
 // A worker has no HTTP surface of its own, so a tiny server exposes metrics/health
 // for Prometheus to scrape (workflow Phase 7).
-const metricsServer = createServer((req, res) => {
+const metricsServer = createServer(async (req, res) => {
   if (req.url === "/metrics") {
-    void metricsText().then((text) => {
-      res.setHeader("Content-Type", contentType);
-      res.end(text);
-    });
-  } else if (req.url === "/health") {
-    res.end("ok");
+    const text = await metricsText();
+    res.setHeader("Content-Type", contentType);
+    res.end(text);
+  } else if (req.url === "/health" || req.url === "/health/live") {
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ status: "ok" }));
+  } else if (req.url === "/health/ready") {
+    res.setHeader("Content-Type", "application/json");
+    try {
+      const ping = await redis.ping();
+      if (ping !== "PONG" || !isMongoReady()) {
+        throw new Error("Dependencies not ready");
+      }
+      res.end(JSON.stringify({ status: "ready" }));
+    } catch (err) {
+      res.statusCode = 503;
+      res.end(
+        JSON.stringify({
+          status: "error",
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
   } else {
     res.statusCode = 404;
     res.end();

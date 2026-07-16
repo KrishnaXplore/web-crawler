@@ -27,7 +27,8 @@
     "@crawler/db": "workspace:*",
     "@crawler/queue": "workspace:*",
     "@crawler/shared": "workspace:*",
-    "@crawler/storage": "workspace:*"
+    "@crawler/storage": "workspace:*",
+    "dotenv": "^17.4.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

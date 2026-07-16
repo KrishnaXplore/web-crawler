@@ -5,7 +5,7 @@ import type { CrawlJobData } from "@crawler/shared";
 import { apiKeyAuth } from "./middleware/auth.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { metricsMiddleware } from "./middleware/metrics.js";
-import { healthRouter } from "./routes/health.js";
+import { createHealthRouter } from "./routes/health.js";
 import { metricsRouter } from "./routes/metrics.js";
 import { searchRouter } from "./routes/search.js";
 import { domainsRouter } from "./routes/domains.js";
@@ -29,7 +29,7 @@ export function createApp(deps: AppDeps): express.Express {
   app.use(express.json());
   app.use(metricsMiddleware);
 
-  app.use("/health", healthRouter);
+  app.use("/health", createHealthRouter(deps));
   app.use("/metrics", metricsRouter);
   app.use("/jobs", apiKeyAuth, createJobsRouter(deps));
   app.use("/search", apiKeyAuth, searchRouter);

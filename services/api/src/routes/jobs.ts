@@ -41,6 +41,7 @@ const createJobSchema = z.object({
   // Opt-in: store full matched values instead of redacted samples (M10).
   exposureReveal: z.boolean().default(false),
   intent: z.string().optional(),
+  focusedCrawl: z.boolean().default(false),
 });
 
 export function createJobsRouter(deps: AppDeps): express.Router {
@@ -74,6 +75,7 @@ export function createJobsRouter(deps: AppDeps): express.Router {
           exposurePatterns: body.exposurePatterns,
           exposureReveal: body.exposureReveal,
           intent: body.intent,
+          focusedCrawl: body.focusedCrawl,
         };
         const jobId = randomUUID();
         await createJob({ jobId, seedUrl: seed, ...config });
@@ -175,21 +177,43 @@ export function createJobsRouter(deps: AppDeps): express.Router {
     const jobId = req.params.id;
     try {
       if (req.query.format === "csv") {
+        // Buffered, not streamed (unlike JSON below): the extracted fields need to
+        // become real named columns — "name", "price", "brand" — not crawl-mechanics
+        // columns with the actual scraped data buried in one JSON-text cell. That
+        // needs the full set of field names before the header row can be written,
+        // which means seeing every page first. A job caps at 1000 pages (validated
+        // at creation), so buffering here is trivial memory, not a real concern.
+        // Only pages that actually produced data become rows — menus, footers
+        // and 404s crawled along the way would otherwise pad the spreadsheet
+        // with empty rows. A listing page contributes one row PER RECORD (M22).
+        // The JSON export still carries every crawled page.
+        const rows: { url: string; extracted: Record<string, unknown> }[] = [];
+        const fieldColumns = new Set<string>();
+        for await (const p of iteratePages(jobId)) {
+          for (const extracted of extractedRowsFor(p.analysis)) {
+            for (const key of Object.keys(extracted)) fieldColumns.add(key);
+            rows.push({ url: p.url, extracted });
+          }
+        }
+        // `url` (the source page) is the only fixed column, so an extracted
+        // field of that name is folded out to avoid a duplicate header. An
+        // extracted `title` is a REAL data column — on a listing page every
+        // record has its own title and the page's <title> is the wrong value
+        // for all of them (M22 verification caught exactly this: 20 books per
+        // page, all showing the page title instead of each book's).
+        const columns = [...fieldColumns].filter((c) => c.toLowerCase() !== "url");
+
         res.setHeader("Content-Type", "text/csv");
         res.setHeader(
           "Content-Disposition",
           `attachment; filename="${jobId}.csv"`,
         );
-        res.write("url,finalUrl,status,depth,discoveredLinks,title\n");
-        for await (const p of iteratePages(jobId)) {
+        res.write(["url", ...columns].map((h) => csv(h)).join(",") + "\n");
+        for (const r of rows) {
           res.write(
             [
-              csv(p.url),
-              csv(p.finalUrl),
-              p.status ?? "",
-              p.depth,
-              p.discoveredLinks,
-              csv(p.title),
+              csv(r.url),
+              ...columns.map((c) => csv(stringifyCell(r.extracted[c]))),
             ].join(",") + "\n",
           );
         }
@@ -216,4 +240,49 @@ export function createJobsRouter(deps: AppDeps): express.Router {
 function csv(value: string | null): string {
   const s = value ?? "";
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/** A single extracted field's value, safe to drop into one CSV cell. */
+function stringifyCell(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+/**
+ * The scraped rows a page contributes to the CSV. A listing page extracted via
+ * a list rule (M22) carries `records: [...]` — one row per repeating item. A
+ * detail page contributes at most one row: `structured` (Tier 1) and `rules`
+ * (Tier 2/4) fields merged rather than picked, since M17's coverage-aware
+ * routing means both can legitimately contribute complementary fields to the
+ * same page (Tier 1 finds name/description, Tier 4 fills in price/brand that
+ * Tier 1 was missing). `rules` wins on a key collision — it's the more
+ * specifically-requested tier. A page with nothing extracted contributes no
+ * rows.
+ */
+function extractedRowsFor(
+  analysis: Record<string, unknown> | null | undefined,
+): Record<string, unknown>[] {
+  const structured = analysis?.structured as
+    | { fields?: Record<string, unknown>; confidence?: string }
+    | undefined;
+  const rules = analysis?.rules as
+    | {
+        fields?: Record<string, unknown>;
+        confidence?: string;
+        records?: Record<string, unknown>[];
+      }
+    | undefined;
+
+  if (rules?.confidence && rules.confidence !== "none" && rules.records?.length) {
+    return rules.records;
+  }
+
+  const merged: Record<string, unknown> = {};
+  if (structured?.confidence && structured.confidence !== "none" && structured.fields) {
+    Object.assign(merged, structured.fields);
+  }
+  if (rules?.confidence && rules.confidence !== "none" && rules.fields) {
+    Object.assign(merged, rules.fields);
+  }
+  return Object.keys(merged).length > 0 ? [merged] : [];
 }

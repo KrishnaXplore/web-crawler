@@ -41,12 +41,29 @@ export async function isCancelled(redis: Redis, jobId: string): Promise<boolean>
   return (await redis.exists(`job:${jobId}:cancelled`)) === 1;
 }
 
+/**
+ * Focused-crawl goal-met flag (M23). For a *detail* intent, once a single-record
+ * page covers the requested fields there's nothing more to find — this flag tells
+ * the enqueue loop to stop expanding. Same tombstone mechanics as cancel: O(1),
+ * race-tolerant (already-queued work still drains), cleared at finalization.
+ * Deliberately NOT set for collection intents — those want breadth, bounded by
+ * the page budget, not an early stop.
+ */
+export async function markGoalMet(redis: Redis, jobId: string): Promise<void> {
+  await redis.set(`job:${jobId}:goalmet`, "1", "EX", CANCEL_TTL_SECONDS);
+}
+
+export async function isGoalMet(redis: Redis, jobId: string): Promise<boolean> {
+  return (await redis.exists(`job:${jobId}:goalmet`)) === 1;
+}
+
 /** Remove a job's transient Redis state once it has completed. */
 export async function clearJobState(redis: Redis, jobId: string): Promise<void> {
   await redis.del(
     `job:${jobId}:pending`,
     `job:${jobId}:pages`,
     `job:${jobId}:cancelled`,
+    `job:${jobId}:goalmet`,
     `seen:${jobId}`,
   );
 }

@@ -9,6 +9,16 @@ export interface DomainObservation {
   readonly tech: readonly string[];
   readonly renderMode: "http" | "browser";
   readonly statusOk: boolean;
+  /** M20: this HTTP-mode fetch looked like a bot-detection challenge — see
+   *  packages/crawler-core/src/pipeline/botChallenge.ts. Feeds `needsRender`. */
+  readonly httpChallengeDetected?: boolean;
+}
+
+/** A learned "this path worked for this ask" shortcut (M18 — Discovery Engine Step B). */
+export interface PathHint {
+  readonly keywords: readonly string[];
+  readonly path: string;
+  readonly confirmedAt: string;
 }
 
 export interface DomainProfile {
@@ -18,10 +28,14 @@ export interface DomainProfile {
   readonly pagesObserved: number;
   readonly techStack: string[];
   readonly renderModesSeen: string[];
-  /** Derived: did any page require the browser? */
+  /** Derived: did any page require the browser, OR did HTTP mode get bot-challenged? */
   readonly needsRender: boolean;
   readonly lastStatusOk: boolean;
+  readonly pathHints: readonly PathHint[];
+  readonly httpChallengeSeen: boolean;
 }
+
+const MAX_PATH_HINTS = 20;
 
 /** Raw persisted shape → typed profile with derived fields. Pure; unit-testable. */
 export function deriveProfile(doc: {
@@ -32,8 +46,13 @@ export function deriveProfile(doc: {
   techStack?: string[] | null;
   renderModesSeen?: string[] | null;
   lastStatusOk?: boolean | null;
+  pathHints?:
+    | readonly { keywords?: string[] | null; path: string; confirmedAt?: Date | string | null }[]
+    | null;
+  httpChallengeSeen?: boolean | null;
 }): DomainProfile {
   const renderModesSeen = doc.renderModesSeen ?? [];
+  const httpChallengeSeen = doc.httpChallengeSeen ?? false;
   const iso = (d: Date | string | null | undefined): string =>
     d ? new Date(d).toISOString() : new Date(0).toISOString();
   return {
@@ -43,9 +62,29 @@ export function deriveProfile(doc: {
     pagesObserved: doc.pagesObserved ?? 0,
     techStack: doc.techStack ?? [],
     renderModesSeen,
-    needsRender: renderModesSeen.includes("browser"),
+    needsRender: renderModesSeen.includes("browser") || httpChallengeSeen,
     lastStatusOk: doc.lastStatusOk ?? true,
+    pathHints: (doc.pathHints ?? []).map((h) => ({
+      keywords: h.keywords ?? [],
+      path: h.path,
+      confirmedAt: iso(h.confirmedAt),
+    })),
+    httpChallengeSeen,
   };
+}
+
+/**
+ * Pure (M18): which of a domain's learned path hints are relevant to *this*
+ * crawl's intent — a hint recorded for "mobile phones" shouldn't boost a link
+ * for a "laptop deals" crawl on the same domain. Overlap is any shared keyword.
+ */
+export function matchingPathHints(
+  hints: readonly PathHint[],
+  intentKeywords: readonly string[],
+): PathHint[] {
+  if (intentKeywords.length === 0) return [];
+  const wanted = new Set(intentKeywords);
+  return hints.filter((h) => h.keywords.some((k) => wanted.has(k)));
 }
 
 /**
@@ -57,11 +96,16 @@ export async function recordDomainObservation(
   domain: string,
   obs: DomainObservation,
 ): Promise<void> {
+  const set: Record<string, unknown> = { lastSeenAt: new Date(), lastStatusOk: obs.statusOk };
+  // Only ever set true — one challenge sighting is enough evidence; a later
+  // unchallenged crawl shouldn't silently erase it (challenges are intermittent
+  // by nature, not something a clean fetch disproves).
+  if (obs.httpChallengeDetected) set.httpChallengeSeen = true;
   await DomainProfileModel.updateOne(
     { _id: domain },
     {
       $setOnInsert: { firstSeenAt: new Date() },
-      $set: { lastSeenAt: new Date(), lastStatusOk: obs.statusOk },
+      $set: set,
       $inc: { pagesObserved: 1 },
       $addToSet: {
         techStack: { $each: [...obs.tech] },
@@ -76,4 +120,33 @@ export async function recordDomainObservation(
 export async function getDomainProfile(domain: string): Promise<DomainProfile | null> {
   const doc = await DomainProfileModel.findById(domain).lean();
   return doc === null ? null : deriveProfile(doc);
+}
+
+/**
+ * Record a learned navigation shortcut (M18 — Discovery Engine Step B): this
+ * `path` produced real extraction results for a crawl whose intent had these
+ * `keywords`. Capped at the most recent `MAX_PATH_HINTS` via `$push` + `$slice`
+ * (a negative slice keeps the *last* N pushed, i.e. the most recent). No
+ * de-duplication in this first pass — a path confirming itself repeatedly just
+ * appears more than once, which the read side (`matchingPathHints`) treats no
+ * differently. Best-effort, same convention as `recordDomainObservation`.
+ */
+export async function recordPathHint(
+  domain: string,
+  keywords: readonly string[],
+  path: string,
+): Promise<void> {
+  if (keywords.length === 0) return;
+  await DomainProfileModel.updateOne(
+    { _id: domain },
+    {
+      $push: {
+        pathHints: {
+          $each: [{ keywords: [...keywords], path, confirmedAt: new Date() }],
+          $slice: -MAX_PATH_HINTS,
+        },
+      },
+    },
+    { upsert: true },
+  );
 }

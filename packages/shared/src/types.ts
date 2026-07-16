@@ -65,6 +65,32 @@ export interface JobConfig {
   readonly exposureReveal?: boolean;
   /** Natural language instruction for what data to extract (M13). */
   readonly intent?: string;
+  /**
+   * Focused-crawl mode (M23): navigate toward the pages that answer the intent
+   * (filter links to product/detail pages for detail intents) and stop early
+   * once a single-record page covers the intent. Opt-in; default off leaves
+   * crawl behaviour exactly as before. Requires an `intent`.
+   */
+  readonly focusedCrawl?: boolean;
+}
+
+/**
+ * The Rule Library's extraction rule shape (M11 Step 2 / M13). Pure/shared — both
+ * `@crawler/core` (which generates/consumes rules via the LLM socket and the `rules`
+ * plugin) and `@crawler/db` (which persists them) need this type; putting it here
+ * keeps crawler-core infra-free (no dependency on the db package for a type).
+ */
+export interface ExtractionRule {
+  readonly domain: string;
+  readonly schemaType: string;
+  readonly fields: Record<string, string>;
+  /**
+   * "detail" (default): `fields` selectors are absolute, one record per page.
+   * "list" (M22): `listItem` matches each repeating item container and `fields`
+   * selectors resolve relative to each container — one record per container.
+   */
+  readonly kind?: "detail" | "list";
+  readonly listItem?: string;
 }
 
 /**

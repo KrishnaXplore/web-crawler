@@ -9,6 +9,7 @@ import {
 } from "../api/client";
 import { ReportCard } from "./ReportCard";
 import { PageDetail } from "./PageDetail";
+import { extractedRecords } from "../extracted";
 
 const TERMINAL = ["completed", "cancelled", "failed"];
 
@@ -125,6 +126,8 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 function Analysis({ a }: { a: Record<string, unknown> }) {
+  const extracted = extractedPreview(a);
+
   const parts: string[] = [];
   const seo = a.seo as { h1Count?: number } | undefined;
   const tech = a.tech as { detected?: string[] } | undefined;
@@ -137,5 +140,39 @@ function Analysis({ a }: { a: Record<string, unknown> }) {
   if (sec?.score) parts.push(`sec:${sec.score}`);
   if (meta?.robots?.noindex) parts.push("noindex");
   if (meta?.isCanonical === false) parts.push("non-canonical");
-  return <span>{parts.join(" · ") || "—"}</span>;
+  const rest = parts.join(" · ");
+
+  if (!extracted && !rest) return <span className="muted">—</span>;
+  return (
+    <span>
+      {extracted && <span className="extraction-hit">{extracted}</span>}
+      {extracted && rest ? " · " : null}
+      {rest}
+    </span>
+  );
+}
+
+/**
+ * A short preview of extracted data, shown directly in the results row so it's
+ * visible without clicking into every page. Before this, the row summary only
+ * ever showed SEO/tech/security signals — extraction results were invisible
+ * from the table, even when extraction was working correctly (only visible by
+ * clicking in).
+ */
+function extractedPreview(a: Record<string, unknown>): string | null {
+  const records = extractedRecords(a);
+  if (records.length === 0) return null;
+  const fields = records[0];
+  const suffix = records.length > 1 ? ` (+${records.length - 1} more)` : "";
+
+  const entries = Object.entries(fields).filter(
+    ([, v]) => typeof v === "string" || typeof v === "number",
+  );
+  if (entries.length === 0) return null;
+
+  const preview = entries
+    .slice(0, 2)
+    .map(([k, v]) => `${k}: ${String(v).slice(0, 30)}`)
+    .join(", ");
+  return `✓ ${preview}${entries.length > 2 ? "…" : ""}${suffix}`;
 }

@@ -21,12 +21,25 @@ export const envSchema = z.object({
   API_KEY: z.string().optional(),
   /** HMAC secret for signing webhook deliveries (M6 B). Unset ⇒ unsigned. */
   WEBHOOK_SECRET: z.string().optional(),
+  /** Gemini API key for the real Tier 4 LLM socket (M15). Unset ⇒ mockLlmSocket. */
+  GEMINI_API_KEY: z.string().optional(),
+  /** Model for Tier 4 rule generation (free-tier eligible via Google AI Studio). */
+  GEMINI_MODEL: z.string().default("gemini-3.1-flash-lite"),
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(4),
   WORKER_METRICS_PORT: z.coerce.number().int().positive().default(9464),
   /** Renderer service (M9): browser pages are heavy — keep concurrency small. */
   RENDER_CONCURRENCY: z.coerce.number().int().positive().default(2),
   RENDERER_METRICS_PORT: z.coerce.number().int().positive().default(9465),
   RENDER_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
+  /**
+   * Renderer service (M9): run headless Chromium (default, correct for a backend
+   * service — no visible window, runs on a windowless server). Set to "false" only
+   * for local debugging when you want to watch the browser drive the page.
+   */
+  RENDER_HEADLESS: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
   CRAWL_DELAY_MS: z.coerce.number().int().nonnegative().default(200),
   CRAWL_USER_AGENT: z
     .string()

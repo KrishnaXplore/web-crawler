@@ -1,17 +1,18 @@
 import express from "express";
-import { getRulesForDomain, upsertRule } from "@crawler/db";
+import { getRuleWithMeta, upsertRule } from "@crawler/db";
 
 export const rulesRouter: express.Router = express.Router();
 
-// GET /rules/:domain
+// GET /rules/:domain — extraction fields + the feedback-loop signal (version,
+// generatedBy, hits/misses, derived hitRate, last-verified). See gap-analysis fix #7.
 rulesRouter.get("/:domain", async (req, res, next) => {
   try {
-    const rules = await getRulesForDomain(req.params.domain);
-    if (!rules) {
+    const rule = await getRuleWithMeta(req.params.domain);
+    if (!rule) {
       res.status(404).json({ error: "No rules found for this domain" });
       return;
     }
-    res.json(rules);
+    res.json(rule);
   } catch (err) {
     next(err);
   }
@@ -30,11 +31,10 @@ rulesRouter.put("/:domain", express.json(), async (req, res, next) => {
       return;
     }
 
-    await upsertRule({
-      domain: req.params.domain,
-      schemaType,
-      fields,
-    });
+    await upsertRule(
+      { domain: req.params.domain, schemaType, fields },
+      { generatedBy: "operator" },
+    );
 
     res.json({ success: true });
   } catch (err) {

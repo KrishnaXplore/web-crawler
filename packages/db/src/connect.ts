@@ -21,3 +21,13 @@ export async function disconnectMongo(): Promise<void> {
   await mongoose.connection.close();
   connected = false;
 }
+
+/**
+ * True iff the Mongo connection is actually up (readyState 1). For readiness probes
+ * (gap-analysis Tier 1). Callers should not need to import `mongoose` themselves just
+ * to check this — that would leak an internal dependency across the package boundary
+ * and require every consumer to declare `mongoose` directly (the bug this fixes).
+ */
+export function isMongoReady(): boolean {
+  return mongoose.connection.readyState === 1;
+}
